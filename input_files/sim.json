@@ -1,0 +1,186 @@
+{
+    "simulation": {
+        "time_step[sec]": 0.0,
+        "end_time[sec]": 2.0,
+        "rk4_verbose" : false
+    },
+    "connections" : {
+        "_graphics" : {
+            "type" : "send",
+            "number_of_values": 14,
+            "refresh_rate": 60,
+            "channel_type": "file",
+            "filename": "graphics.csv"
+        },
+        "graphics" : {
+            "type" : "send",
+            "number_of_values": 14,
+            "refresh_rate": 150,
+            "channel_type": "udp",
+            "port_ID": 50000
+        },
+        "controls" : {
+            "is_use" : true,
+            "type" : "receive",
+            "number_of_values": 4,
+            "double_precision": true,
+            "wait_for_input" : false,
+            "refresh_rate": 150,
+            "channel_type": "udp",
+            "port_ID": 50001
+        }
+    },
+    "vehicle" : {
+        "mass" : {
+            "weight[lbf]" : 20500.0,
+            "Ixx[slug-ft^2]" : 9496.0,
+            "Iyy[slug-ft^2]" : 55814.0,
+            "Izz[slug-ft^2]" : 63100.0,
+            "Ixy[slug-ft^2]" : 0.0,
+            "Ixz[slug-ft^2]" : 982.0,
+            "Iyz[slug-ft^2]" : 0.0,
+            "hx[slug-ft^2/s]" : 160.0,
+            "hy[slug-ft^2/s]" : 0.0,
+            "hz[slug-ft^2/s]" : 0.0 
+        },
+        "thrust" : {
+            "Thrust0[lbf]" : 29550,
+            "Ta" : 0.84
+        },
+        "aerodynamics" : {
+            "reference" : {
+                "area[ft^2]" : 300.0,
+                "longitudinal_length[ft]" : 11.32,
+                "lateral_length[ft]" : 30.0,
+                "relative_location[ft]_shift" : [-1.0,0.0,0.0],
+                "relative_location[ft]" : [-1.0,0.0,0.0]
+            },
+            "stall" : {
+                "include_stall" : true,
+                "CL" : {
+                    "alpha_0[deg]" : 0.0,
+                    "alpha_s[deg]" : 43.0,
+                    "lambda_b" : 7.0
+                },
+                "CD" : {
+                    "alpha_0[deg]" : 5.0,
+                    "alpha_s[deg]" : 45.0,
+                    "lambda_b" : 7.0
+                },
+                "Cm" : {
+                    "min" : -0.6184,
+                    "alpha_0[deg]" : 20.0,
+                    "alpha_s[deg]" : 40.0,
+                    "lambda_b" : 6.0
+                }
+            },
+            "coefficients" : {
+                "CL" : {
+                    "0" : 0.0535,
+                    "alpha" : 3.8459,
+                    "alphahat" : 0.0,
+                    "qbar" : 29.5,
+                    "elevator" : 0.5153 
+                },
+                "CS" : {
+                    "beta" : -1.1086,
+                    "pbar" : -0.0207,
+                    "alpha_pbar" : 1.1566,
+                    "rbar" : 0.9900,
+                    "aileron" : 0.0601,
+                    "rudder" : 0.1668
+                },
+                "CD" : {
+                    "L0" : 0.0425,
+                    "CL1" : -0.1154,
+                    "CL1_CL1" : 0.2427,
+                    "CS_CS" : 0.8733,
+                    "qbar" : -1.498,
+                    "alpha_qbar" : 22.99,
+                    "elevator" : -0.0006,
+                    "alpha_elevator" : 0.7084,
+                    "elevator_elevator" : 0.3251
+                },
+                "Cl" : {
+                    "beta" : -0.1048,
+                    "pbar" : -0.3766,
+                    "rbar" : -0.0206,
+                    "alpha_rbar" : 1.0114,
+                    "aileron" : -0.1337,
+                    "rudder" : 0.0272
+                },
+                "Cm" : {
+                    "0" : -0.0642,
+                    "alpha" : 0.0955,
+                    "qbar" : -5.5,
+                    "alphahat" : 0.0,
+                    "elevator" : -0.5926
+                },
+                "Cn" : {
+                    "beta" : 0.2194,
+                    "pbar" : -0.0074,
+                    "alpha_pbar" : -0.0904,
+                    "rbar" : -0.4605,
+                    "aileron" : -0.0379,
+                    "alpha_aileron" : 0.0922, 
+                    "rudder" : -0.0854
+                }
+            }
+        }
+    },
+    "initial": {
+        "airspeed[ft/sec]" : 350.0,
+        "altitude[ft]" : 3000.0,
+        "Euler_angles[deg]" : [0.0,0.0,0.0],
+        "type" : "trim",
+        "state" : {
+            "angle_of_attack[deg]" : 4.0,
+            "sideslip_angle[deg]" : 0.02207334415665,
+            "angular_rates[deg/s]" : [0.0,0.0,0.0],
+            "aileron[deg]" : 0.0,
+            "elevator[deg]":0.0,
+            "rudder[deg]": 0.0,
+            "throttle": 0.2
+        },
+        "trim" : {
+            "type" : "sct",
+            "elevation_or_climb" : "climb",
+            "elevation_angle[deg]" : 10.0,
+            "climb_angle[deg]" : 0.0,
+            "type_sct" : {
+                "bank_angle[deg]" : 0.0
+            },
+            "type_shss" : {
+                "bank_or_beta" : "beta",
+                "bank" : {
+                    "bank_angle[deg]" :   0.0
+                },
+                "beta" : {
+                    "sideslip_angle[deg]" :  0.0
+                }
+            },
+            "type_vbr" : {
+                "p_wind[deg/s]" : 0.0,
+                "bank_angle[deg]" : 0.0
+            },
+            "solver" : {
+                "finite_difference_step_size" : 0.01,
+                "relaxation_factor" : 0.9,
+                "tolerance" : 1.0e-13,
+                "max_iterations" : 1000
+            }
+        }
+    },
+    "controller" : {
+        "is_use_controller" : true,
+        "Example" : ["Commanded Value", "P Gain", "I Gain", "D Gain"],
+        "rollRateControl" : [0.0, -0.314159, -0.38397, -0.0004],
+        "bankAngleControl" : [0.0, 2.2, 0.0, 0.1],
+        "pitchRateControl" : [0.0, -0.41887902, -1.22173048, -0.000296706],
+        "elevationAngleControl" : [0.0, 2.2, 0.0, 0.1],
+        "yawRateControl" : [0.0, -0.8981317, -3.945, -0.000296706],
+        "velocityControl" : [500.0, 0.1, 0.001, 0.0]
+    }
+    
+}
+
