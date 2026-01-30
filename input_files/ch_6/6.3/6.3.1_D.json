@@ -1,9 +1,9 @@
 {
     "simulation" : {
         "time_step[s]" : 0.01,
-        "end_time[s]" : 0.01,
-        "rk4_verbose" : true,
-        "save_states" : true
+        "end_time[s]" : 10.0,
+        "rk4_verbose" : false,
+        "save_states" : false
     },
     "vehicles" : {
         "ping-pong-ball" : {
@@ -67,6 +67,7 @@
                         "CL1_CL1" : 48.138
                     },
                     "Cl" : {
+                        "is_straight_fletchings" : true,
                         "0" : 0.0,
                         "1" : 3.223,
                         "pbar" : -5.378
@@ -192,34 +193,49 @@
                 }
             },
             "initial" : {
-                "airspeed[ft/s]" : 550.0,
-                "altitude[ft]" : 0.0,
+                "airspeed[ft/s]" : 330.0,
+                "altitude[ft]" : 5000.0,
                 "latitude[deg]" : 0.0,
                 "longitude[deg]" : 0.0,
-                "Euler_angles[deg]" : [20.0, 80.0, 0.0],
-                "type" : "state",
+                "Euler_angles[deg]" : [0.0,13.927546386874,0.0],
+                "type" : "trim",
                 "state" : {
-                    "angle_of_attack[deg]" : 8.439045225037,
-                    "sideslip_angle[deg]" : 0.0,
-                    "p[deg/s]" : 0.0,
-                    "q[deg/s]" : 0.0,
-                    "r[deg/s]" : 0.0,
-                    "aileron[deg]" : 0.0,
-                    "elevator[deg]" : -9.438041040744,
-                    "rudder[deg]" : 0.0,
-                    "throttle" : 0.073998565634
+                    "angle_of_attack[deg]" : 11.278107537468,
+                    "sideslip_angle[deg]" : 0.022727214169,
+                    "p[deg/s]" : -0.766207504385,
+                    "q[deg/s]" : 3.834356702909,
+                    "r[deg/s]" : 3.834356702909,
+                    "aileron[deg]" : 0.123007387668,
+                    "elevator[deg]" : -11.389397552606,
+                    "rudder[deg]" : -0.871269845919,
+                    "throttle" : 0.129524457808
                 },
                 "trim" : {
                     "type" : "sct",
-                    "ref_climb_angle[deg]" : 90.0,
-                    "_sideslip_angle[deg]" : -10.0,
-                    "_load_factor" : 1.0,
+                    "elevation_or_climb" : "elevation",
+                    "elevation_angle[deg]" : 9.130946229092,
+                    "climb_angle[deg]" : 0.0,
+                    "type_sct" : {
+                        "bank_angle[deg]" : 180.0
+                    },
+                    "type_shss" : {
+                        "bank_or_beta" : "beta",
+                        "bank" : {
+                            "bank_angle[deg]" :   0.0
+                        },
+                        "beta" : {
+                            "sideslip_angle[deg]" :  0.0
+                        }
+                    },
+                    "type_vbr" : {
+                        "p_wind[deg/s]" : 0.0,
+                        "bank_angle[deg]" : 0.0
+                    },
                     "solver" : {
-                        "finite_difference_step_size" : 0.001,
-                        "relaxation_factor" : 0.2,
-                        "tolerance" : 1.0e-14,
-                        "max_iterations" : 1000,
-                        "verbose" : true
+                        "finite_difference_step_size" : 0.01,
+                        "relaxation_factor" : 0.9,
+                        "tolerance" : 1.0e-13,
+                        "max_iterations" : 1000
                     }
                 }
             }
