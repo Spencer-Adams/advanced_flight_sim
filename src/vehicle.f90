@@ -856,15 +856,6 @@ contains
         integer :: i, j
         real :: xdot_temp (3), euler_temp(3), qt(4)
 
-
-        write(*,*) "Trim sideslip angle (deg):", trim_sideslip_angle*180.0/PI
-        write(*,*) "Trim sideslip angle (deg):", trim_sideslip_angle*180.0/PI
-        write(*,*) "Trim sideslip angle (deg):", trim_sideslip_angle*180.0/PI
-        write(*,*) "Trim sideslip angle (deg):", trim_sideslip_angle*180.0/PI
-        write(*,*) "Trim sideslip angle (deg):", trim_sideslip_angle*180.0/PI
-        write(*,*) "Trim sideslip angle (deg):", trim_sideslip_angle*180.0/PI
-        write(*,*) "Trim sideslip angle (deg):", trim_sideslip_angle*180.0/PI
-
         gravity = gravity_English(-H_altitude)
         alpha = 0.0
         allocate(DeltaG(6))
