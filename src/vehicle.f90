@@ -257,10 +257,13 @@ contains
         real :: alpha, beta, p_wind
         real :: trim_array(9)
         real :: trim_bank_angle, trim_elevation_angle, trim_sideslip_angle, trim_azimuth_angle
+        real :: trim_load_factor, load_factor_temp, gravity_temp, a_c_temp
+        real :: qt_temp(4), euler_temp(3), xdot_temp(3), v_t_temp
         real :: trim_climb_angle, finite_diff_step, relax_factor, newton_tol
         integer :: newton_max_iter
-        logical :: is_trim_sideslip_angle
+        logical :: is_trim_sideslip_angle, is_trim_sct_load_factor
         character(:), allocatable :: is_elevation_or_climb, trim_type, is_bank_or_beta_for_shss
+        character(:), allocatable :: is_bank_or_load_factor_for_sct
 
         write(*,*) ' Setting trim'
         call jsonx_get(this%j_vehicle, 'initial', j_initial)
@@ -286,15 +289,23 @@ contains
         p_wind = 0.0
         trim_azimuth_angle = this%init_eul(3)
         is_trim_sideslip_angle = .false.
+        is_trim_sct_load_factor = .false.
+        trim_load_factor = 0.0
         if (trim_type == "sct") then
-            call jsonx_get(j_trim, "type_sct.bank_angle[deg]", trim_bank_angle)
+            call jsonx_get(j_trim, "type_sct.bank_or_load_factor", is_bank_or_load_factor_for_sct)
+            if (is_bank_or_load_factor_for_sct == "bank") then 
+                call jsonx_get(j_trim, "type_sct.bank_angle[deg]", trim_bank_angle)
+            else if (is_bank_or_load_factor_for_sct == "load_factor") then 
+                is_trim_sct_load_factor = .true.
+                call jsonx_get(j_trim, "type_sct.load_factor", trim_load_factor)
+            end if 
         else if (trim_type == "shss") then
             call jsonx_get(j_trim, "type_shss.bank_or_beta", is_bank_or_beta_for_shss)
             if (is_bank_or_beta_for_shss == "bank") then 
-                call jsonx_get(j_trim, "type_shss.bank.bank_angle[deg]", trim_bank_angle)
+                call jsonx_get(j_trim, "type_shss.bank_angle[deg]", trim_bank_angle)
             else if (is_bank_or_beta_for_shss == "beta") then 
                 is_trim_sideslip_angle = .true.
-                call jsonx_get(j_trim, "type_shss.beta.sideslip_angle[deg]", trim_sideslip_angle)
+                call jsonx_get(j_trim, "type_shss.sideslip_angle[deg]", trim_sideslip_angle)
             end if 
         else if (trim_type == "vbr") then 
             call jsonx_get(j_trim, "type_vbr.p_wind[deg/s]", p_wind)
@@ -316,7 +327,9 @@ contains
         write(*,*) "y[ft]", this%init_state(8)
         write(*,*) "altitude[ft]", this%init_state(9)
         write(*,*) "trim_type ", trim_type
-        write(*,*) "is_bank_or_beta_for_shss ", is_bank_or_beta_for_shss
+        if (trim_type == "shss") then 
+            write(*,*) "is_bank_or_beta_for_shss ", is_bank_or_beta_for_shss
+        end if
         write(*,*) "trim_bank_angle", trim_bank_angle
         write(*,*) "trim_elevation_angle", trim_elevation_angle
         write(*,*) "trim_azimuth_angle", trim_azimuth_angle
@@ -340,35 +353,34 @@ contains
 
         trim_array = trim_algorithm(this, this%init_state(9), newton_tol, p_wind, trim_type, is_trim_sideslip_angle, &
                 trim_sideslip_angle, trim_bank_angle, trim_elevation_angle, trim_climb_angle, is_elevation_or_climb, &
-                relax_factor, trim_azimuth_angle, finite_diff_step)
+                relax_factor, trim_azimuth_angle, finite_diff_step, is_trim_sct_load_factor, trim_load_factor)
         if (is_bank_or_beta_for_shss == "beta" .and. trim_type == "shss") then 
             this%init_state(10:13) = euler_to_quat([trim_array(2), trim_elevation_angle, trim_azimuth_angle])
-            write(*,'(A12,1X,E22.13)') "theta[deg]", trim_elevation_angle*180.0/PI
-            write(*,'(A12,1X,E22.13)') "phi[deg]", trim_array(2)*180.0/PI
-            write(*,'(A12,1X,E22.13)') "alpha[deg]", trim_array(1)*180.0/PI
-            write(*,'(A12,1X,E22.13)') "beta[deg]", beta*180.0/PI
-            write(*,'(A12,1X,E22.13)') "p[deg/s]", trim_array(3)*180.0/PI
-            write(*,'(A12,1X,E22.13)') "q[deg/s]", trim_array(4)*180.0/PI
-            write(*,'(A12,1X,E22.13)') "r[deg/s]", trim_array(5)*180.0/PI
-            write(*,'(A12,1X,E22.13)') "da[deg]", trim_array(6)*180.0/PI
-            write(*,'(A12,1X,E22.13)') "de[deg]", trim_array(7)*180.0/PI
-            write(*,'(A12,1X,E22.13)') "dr[deg]", trim_array(8)*180.0/PI
-            write(*,'(A12,1X,E22.13)') "tau", trim_array(9)
+            write(*,'(A12,1X,E22.14)') "theta[deg]", trim_elevation_angle*180.0/PI
+            write(*,'(A12,1X,E22.14)') "phi[deg]", trim_array(2)*180.0/PI
+            write(*,'(A12,1X,E22.14)') "alpha[deg]", trim_array(1)*180.0/PI
+            write(*,'(A12,1X,E22.14)') "beta[deg]", beta*180.0/PI
+            write(*,'(A12,1X,E22.14)') "p[deg/s]", trim_array(3)*180.0/PI
+            write(*,'(A12,1X,E22.14)') "q[deg/s]", trim_array(4)*180.0/PI
+            write(*,'(A12,1X,E22.14)') "r[deg/s]", trim_array(5)*180.0/PI
+            write(*,'(A12,1X,E22.14)') "da[deg]", trim_array(6)*180.0/PI
+            write(*,'(A12,1X,E22.14)') "de[deg]", trim_array(7)*180.0/PI
+            write(*,'(A12,1X,E22.14)') "dr[deg]", trim_array(8)*180.0/PI
+            write(*,'(A12,1X,E22.14)') "tau", trim_array(9)
         else
             beta = trim_array(2)
             this%init_state(10:13) = euler_to_quat([trim_bank_angle, trim_elevation_angle, trim_azimuth_angle])
-            write(*,'(A12,1X,E22.13)') "theta[deg]", trim_elevation_angle*180.0/PI
-            write(*,'(A12,1X,E22.13)') "phi[deg]", trim_bank_angle*180.0/PI
-            write(*,'(A12,1X,E22.13)') "alpha[deg]", trim_array(1)*180.0/PI
-            write(*,'(A12,1X,E22.13)') "beta[deg]", trim_array(2)*180.0/PI
-            write(*,'(A12,1X,E22.13)') "p[deg/s]", trim_array(3)*180.0/PI
-            write(*,'(A12,1X,E22.13)') "q[deg/s]", trim_array(4)*180.0/PI
-            write(*,'(A12,1X,E22.13)') "r[deg/s]", trim_array(5)*180.0/PI
-            write(*,'(A12,1X,E22.13)') "da[deg]", trim_array(6)*180.0/PI
-            write(*,'(A12,1X,E22.13)') "de[deg]", trim_array(7)*180.0/PI
-            write(*,'(A12,1X,E22.13)') "dr[deg]", trim_array(8)*180.0/PI
-            write(*,'(A12,1X,E22.13)') "tau", trim_array(9)
-            ! write(*,'(A12,1X,E22.13)') "psi[deg]", trim_azimuth_angle*180.0/PI
+            write(*,'(A12,1X,E22.14)') "theta[deg]", trim_elevation_angle*180.0/PI
+            write(*,'(A12,1X,E22.14)') "phi[deg]", trim_bank_angle*180.0/PI
+            write(*,'(A12,1X,E22.14)') "alpha[deg]", trim_array(1)*180.0/PI
+            write(*,'(A12,1X,E22.14)') "beta[deg]", trim_array(2)*180.0/PI
+            write(*,'(A12,1X,E22.14)') "p[deg/s]", trim_array(3)*180.0/PI
+            write(*,'(A12,1X,E22.14)') "q[deg/s]", trim_array(4)*180.0/PI
+            write(*,'(A12,1X,E22.14)') "r[deg/s]", trim_array(5)*180.0/PI
+            write(*,'(A12,1X,E22.14)') "da[deg]", trim_array(6)*180.0/PI
+            write(*,'(A12,1X,E22.14)') "de[deg]", trim_array(7)*180.0/PI
+            write(*,'(A12,1X,E22.14)') "dr[deg]", trim_array(8)*180.0/PI
+            write(*,'(A12,1X,E22.14)') "tau", trim_array(9)
         end if  
         alpha = trim_array(1)
         this%init_state(1) = this%init_V*cos(alpha)*cos(beta)
@@ -376,6 +388,24 @@ contains
         this%init_state(3) = this%init_V*sin(alpha)*cos(beta)
         this%init_state(4:6) = trim_array(3:5)
         this%controls(1:4) = trim_array(6:9) 
+
+        load_factor_temp = 0.0
+        ! get load factor from that 
+        if (is_trim_sct_load_factor) then 
+            call pseudo_aero(this, this%init_state)
+            write(*,*) "Forces: ", this%FM(1), this%FM(2), this%FM(3)
+            write(*,*) "Moments: ", this%FM(4), this%FM(5), this%FM(6)
+            gravity_temp = gravity_English(-this%init_state(9))
+            euler_temp = (/trim_bank_angle, trim_elevation_angle, trim_azimuth_angle/)
+            qt_temp = euler_to_quat(euler_temp)
+            xdot_temp = quat_dependent_to_base((/this%init_state(1),this%init_state(2),this%init_state(3)/)&
+            , (/qt_temp(1), qt_temp(2), qt_temp(3), qt_temp(4)/))        
+            v_t_temp = sqrt(xdot_temp(1)**2+xdot_temp(2)**2)
+            a_c_temp = v_t_temp**2/(R_E_English - this%init_state(9))
+            load_factor_temp = calc_load_factor(this, this%FM(1), this%FM(3), alpha, this%mass, gravity_temp, a_c_temp)
+            write(*,*) "Load Factor: ", load_factor_temp
+        end if 
+
     end subroutine init_to_trim
 
     subroutine mass_inertia(this) 
@@ -831,17 +861,19 @@ contains
     !!!!!! trim stuff !!!!!!
     function trim_algorithm(this, H_altitude, newton_tol, p_wind, trim_type, is_trim_sideslip_angle, &
         trim_sideslip_angle, trim_bank_angle, trim_elevation_angle, trim_climb_angle, &
-        is_elevation_or_climb, relax_factor, trim_azimuth_angle, finite_diff_step) result(trim_result)
+        is_elevation_or_climb, relax_factor, trim_azimuth_angle, finite_diff_step, is_trim_sct_load_factor, &
+        trim_load_factor) result(trim_result)
         implicit none 
         type(vehicle_t) :: this
         real, intent(in) :: H_altitude, newton_tol
         real, intent(in) :: p_wind
 
         character(len=*), intent(in) :: trim_type, is_elevation_or_climb
-        logical, intent(in) :: is_trim_sideslip_angle
-        real, intent(in) :: trim_sideslip_angle, trim_bank_angle, trim_climb_angle
+        logical, intent(in) :: is_trim_sideslip_angle, is_trim_sct_load_factor
+        real, intent(in) :: trim_sideslip_angle, trim_climb_angle
         real, intent(in) :: relax_factor, trim_azimuth_angle, finite_diff_step
-        real :: trim_elevation_angle
+        real, intent(in) :: trim_load_factor
+        real :: trim_elevation_angle, trim_bank_angle
         real :: trim_result(9)
         real :: alpha, beta, p, q, r, da, de, dr, tau,x,y,z
         real :: pos(3), quat_orientation(4)
@@ -854,7 +886,10 @@ contains
         real :: gravity, a_c, v_t 
         real :: newton_input(6)
         integer :: i, j
-        real :: xdot_temp (3), euler_temp(3), qt(4)
+        real :: load_factor_error, p_old, q_old, r_old
+        real :: phi_lf_convergence_tol
+        integer :: k_lf
+        real :: xdot_temp(3), euler_temp(3), qt(4)
 
         gravity = gravity_English(-H_altitude)
         alpha = 0.0
@@ -870,6 +905,9 @@ contains
         x = 0.0
         y = 0.0
         z = H_altitude
+        p = 0.0
+        q = 0.0
+        r = 0.0
         da = 0.0
         de = 0.0 
         dr = 0.0
@@ -890,16 +928,44 @@ contains
             end if
             theta = trim_elevation_angle
             psi = trim_azimuth_angle
-            euler_temp = (/phi, theta, psi/)
-            qt = euler_to_quat(euler_temp)
-            xdot_temp = quat_dependent_to_base((/u,v,w/), (/qt(1), qt(2), qt(3), qt(4)/))
-            !!!! velocity with gravity relief
-            v_t = sqrt(xdot_temp(1)**2+xdot_temp(2)**2)
-            a_c = v_t**2/(R_E_English - z)
-            sct_pqr_coeff = (gravity-a_c)*sin(phi)*cos(theta)/(u*cos(theta)*cos(phi)+w*sin(theta))
-            p = -sct_pqr_coeff*(sin(trim_elevation_angle))
-            q = sct_pqr_coeff*(sin(trim_bank_angle)*cos(trim_elevation_angle))
-            r = sct_pqr_coeff*(cos(trim_bank_angle)*cos(trim_elevation_angle))
+            ! Converge phi and pqr when load factor trim is active
+            if (is_trim_sct_load_factor) then
+                phi_lf_convergence_tol = 1.0e-9
+                load_factor_error = 100.0
+                k_lf = 1
+                do while (load_factor_error > phi_lf_convergence_tol .and. k_lf < 100)
+                    ! Calculate p, q, r based on current phi
+                    euler_temp = (/phi, theta, psi/)
+                    qt = euler_to_quat(euler_temp)
+                    xdot_temp = quat_dependent_to_base((/u,v,w/), (/qt(1), qt(2), qt(3), qt(4)/))        
+                    v_t = sqrt(xdot_temp(1)**2+xdot_temp(2)**2)
+                    a_c = v_t**2/(R_E_English - z)
+                    sct_pqr_coeff = (gravity-a_c)*sin(phi)*cos(theta)/(u*cos(theta)*cos(phi)+w*sin(theta))
+                    p_old = p
+                    q_old = q
+                    r_old = r
+                    p = -sct_pqr_coeff*(sin(theta))
+                    q = sct_pqr_coeff*(sin(phi)*cos(theta))
+                    r = sct_pqr_coeff*(cos(phi)*cos(theta))
+                    ! Recalculate phi from updated p, q, r
+                    trim_bank_angle = calc_phi_from_load_factor(this, u,v,w,p,q,r,alpha,theta, gravity, trim_load_factor, z)
+                    phi = trim_bank_angle
+                    ! Check convergence
+                    load_factor_error = max(abs(p-p_old), abs(q-q_old), abs(r-r_old))
+                    k_lf = k_lf + 1
+                end do
+            else
+                ! No load factor constraint, just calculate pqr once
+                euler_temp = (/phi, theta, psi/)
+                qt = euler_to_quat(euler_temp)
+                xdot_temp = quat_dependent_to_base((/u,v,w/), (/qt(1), qt(2), qt(3), qt(4)/))        
+                v_t = sqrt(xdot_temp(1)**2+xdot_temp(2)**2)
+                a_c = v_t**2/(R_E_English - z)
+                sct_pqr_coeff = (gravity-a_c)*sin(phi)*cos(theta)/(u*cos(theta)*cos(phi)+w*sin(theta))
+                p = -sct_pqr_coeff*(sin(theta))
+                q = sct_pqr_coeff*(sin(phi)*cos(theta))
+                r = sct_pqr_coeff*(cos(phi)*cos(theta))
+            end if
         else if (trim_type == "vbr") then 
             p = (p_wind/this%init_V)*u
             q = (p_wind/this%init_V)*v
@@ -936,20 +1002,48 @@ contains
             if (is_elevation_or_climb == "climb") then 
                 trim_elevation_angle = calc_theta_from_climb_angle(this, u, v, w, phi, trim_climb_angle)
             end if 
-            ! write(*,*) "Trim theta", trim_elevation_angle * 180.0/PI
+            ! write(*,*) "Trim theta", trim_elevation_angle * 180.0/PI this is in degrees
             if (trim_type == "sct") then  
                 theta = trim_elevation_angle
                 psi = trim_azimuth_angle
-                euler_temp = (/phi, theta, psi/)
-                qt = euler_to_quat(euler_temp)
-                xdot_temp = quat_dependent_to_base((/u,v,w/), (/qt(1), qt(2), qt(3), qt(4)/))
-                !!!! velocity with gravity relief
-                v_t = sqrt(xdot_temp(1)**2+xdot_temp(2)**2)
-                a_c = v_t**2/(R_E_English - z)
-                sct_pqr_coeff = (gravity-a_c)*sin(phi)*cos(theta)/(u*cos(theta)*cos(phi)+w*sin(theta))
-                p = -sct_pqr_coeff*(sin(trim_elevation_angle))
-                q = sct_pqr_coeff*(sin(trim_bank_angle)*cos(trim_elevation_angle))
-                r = sct_pqr_coeff*(cos(trim_bank_angle)*cos(trim_elevation_angle))
+                ! Converge phi and pqr when load factor trim is active
+                if (is_trim_sct_load_factor) then
+                    phi_lf_convergence_tol = 1.0e-9
+                    load_factor_error = 100.0
+                    k_lf = 1
+                    do while (load_factor_error > phi_lf_convergence_tol .and. k_lf < 100)
+                        ! Calculate p, q, r based on current phi
+                        euler_temp = (/phi, theta, psi/)
+                        qt = euler_to_quat(euler_temp)
+                        xdot_temp = quat_dependent_to_base((/u,v,w/), (/qt(1), qt(2), qt(3), qt(4)/))        
+                        v_t = sqrt(xdot_temp(1)**2+xdot_temp(2)**2)
+                        a_c = v_t**2/(R_E_English - z)
+                        sct_pqr_coeff = (gravity-a_c)*sin(phi)*cos(theta)/(u*cos(theta)*cos(phi)+w*sin(theta))
+                        p_old = p
+                        q_old = q
+                        r_old = r
+                        p = -sct_pqr_coeff*(sin(theta))
+                        q = sct_pqr_coeff*(sin(phi)*cos(theta))
+                        r = sct_pqr_coeff*(cos(phi)*cos(theta))
+                        ! Recalculate phi from updated p, q, r
+                        trim_bank_angle = calc_phi_from_load_factor(this, u,v,w,p,q,r,alpha,theta, gravity, trim_load_factor, z)
+                        phi = trim_bank_angle
+                        ! Check convergence
+                        load_factor_error = max(abs(p-p_old), abs(q-q_old), abs(r-r_old))
+                        k_lf = k_lf + 1
+                    end do
+                else
+                    ! No load factor constraint, just calculate pqr once
+                    euler_temp = (/phi, theta, psi/)
+                    qt = euler_to_quat(euler_temp)
+                    xdot_temp = quat_dependent_to_base((/u,v,w/), (/qt(1), qt(2), qt(3), qt(4)/))        
+                    v_t = sqrt(xdot_temp(1)**2+xdot_temp(2)**2)
+                    a_c = v_t**2/(R_E_English - z)
+                    sct_pqr_coeff = (gravity-a_c)*sin(phi)*cos(theta)/(u*cos(theta)*cos(phi)+w*sin(theta))
+                    p = -sct_pqr_coeff*(sin(theta))
+                    q = sct_pqr_coeff*(sin(phi)*cos(theta))
+                    r = sct_pqr_coeff*(cos(phi)*cos(theta))
+                end if
             else if (trim_type == "vbr") then 
                 p = (p_wind/this%init_V)*u
                 q = (p_wind/this%init_V)*v
@@ -961,46 +1055,13 @@ contains
             end if 
             residual = calc_residual(this, newton_input, p, q, r, is_trim_sideslip_angle, &
                     trim_azimuth_angle, trim_bank_angle, trim_elevation_angle, trim_sideslip_angle, trim_type)
-            ! if (rk4_verbose) then
-            ! write(*,'(a)') 'Updating rotation rates for ', trim_type
-            ! write(*,'(a,1x,e25.16)') 'p [deg/s] = ', (p * 180.0/PI)
-            ! write(*,'(a,1x,e25.16)') 'q [deg/s] = ', (q * 180.0/PI)
-            ! write(*,'(a,1x,e25.16)') 'r [deg/s] = ', (r * 180.0/PI)
-            ! write(*,'(a)') 'G defined as G = [alpha, beta, aileron, elevator, rudder, throttle]'
-            ! write(*,'(a,1x,6(e25.16,","))') 'G = ', newton_input
-            ! write(*,'(a,1x,6(e25.16,","))') 'r = ', residual
-            ! write(*,'(a,1x,e25.16)') 'current_error = ', current_error
-            ! end if
-            ! write(*,*) "residual"
-            ! write(*,*) residual
-        ! function create_jacobian(this, states, step_size, p, q, r, is_trim_sideslip_angle, &
-        ! trim_azimuth_angle, trim_bank_angle, trim_elevation_angle, trim_sideslip_angle, trim_type)
             jacobian = create_jacobian(this, newton_input, finite_diff_step, p, q, r, is_trim_sideslip_angle, &
                     trim_azimuth_angle, trim_bank_angle, trim_elevation_angle, trim_sideslip_angle, trim_type)
-            ! if (rk4_verbose) then
-            ! write(*,'(a)') 'Jacobian Matrix ='
-            ! do i = 1,6
-            !     write(*,'(6(1x,e25.16))') jacobian(i,:)
-            ! end do
-            ! end if
-            ! write(*,*) "jacobian"
-            ! write(*,*) jacobian
             call lu_solve(6,jacobian,residual,DeltaG)
-            ! write(*,*) "DeltaG"
-            ! write(*,*) -DeltaG
             newton_input = newton_input - relax_factor*DeltaG
-            ! write(*,*) "New G"
-            ! write(*,*) newton_input
             residual = calc_residual(this, newton_input, p, q, r, is_trim_sideslip_angle, &
                         trim_azimuth_angle, trim_bank_angle, trim_elevation_angle, trim_sideslip_angle, trim_type)
-            ! write(*,'(a,1x,6(e25.16,","))') 'r = ', residual
             current_error = maxval(abs(residual))
-            ! write(*,*) "Iteration ", j, " Current Error ", current_error
-            ! write(*,*) "Iteration, Residual, alpha, beta, p, q, &
-            ! r, phi, theta, ail, el, rud, throttle"
-            ! write(*,*) j, current_error, newton_input(1)*180.0/PI, &
-            ! newton_input(2)*180.0/PI, p*180.0/PI, q*180.0/PI, r*180.0/PI, phi*180.0/PI,trim_elevation_angle*180.0/PI, &
-            ! newton_input(3)*180.0/PI, newton_input(4)*180.0/PI, newton_input(5)*180.0/PI, newton_input(6)
             j = j + 1
         end do 
         alpha = newton_input(1)
@@ -1075,6 +1136,61 @@ contains
             write(*,*) "WARNING, BOTH THETA VALUES DO NOT SATISFY THE LHS OF EQ. 7.2.9" 
         end if 
     end function calc_theta_from_climb_angle
+
+    function calc_phi_from_load_factor(this, u, v, w, p, q, r, alpha, theta, g, load_factor, z) result(return_phi)
+        implicit none 
+        type(vehicle_t) :: this
+        real, intent(in) :: u, v, w, p, q, r, alpha, theta, g, load_factor, z
+        real :: C_theta, S_theta, C_alpha, S_alpha, A, error_tol, current_error
+        real :: phi_guess, phi_current, g_minus_ac 
+        real :: psi
+        real :: return_phi, parenthesis_term
+        integer :: i 
+        real :: xdot_temp(3), euler_temp(3), qt(4)
+        real :: a_c, v_t 
+        current_error = 100.0
+        error_tol = 1e-13
+        a_c = 0.0
+        g_minus_ac = g-a_c 
+        C_theta = cos(theta)
+        S_theta = sin(theta) 
+        C_alpha = cos(alpha)
+        S_alpha = sin(alpha) 
+        parenthesis_term = (C_theta)/(load_factor)
+        phi_guess = acos( max(-1.0, min(1.0, parenthesis_term)))
+        i = 1
+        psi = 0.0
+        do while(current_error > error_tol .and. i < 500)
+            euler_temp = (/phi_guess, theta, psi/)
+            qt = euler_to_quat(euler_temp)
+            xdot_temp = quat_dependent_to_base((/u,v,w/), (/qt(1), qt(2), qt(3), qt(4)/))
+            !!!! velocity with gravity relief
+            v_t = sqrt(xdot_temp(1)**2+xdot_temp(2)**2)
+            a_c = v_t**2/(R_E_English - z)
+            g_minus_ac = g - a_c
+            A = (S_theta + (q*w-r*v)/g_minus_ac)*S_alpha
+            parenthesis_term = (C_theta + cos(phi_guess)*S_theta*w/u)/&
+            ((load_factor-A)/(C_alpha)+p*v/g_minus_ac)-w*S_theta/(u*C_theta)
+            phi_current = acos(max(-1.0, min(1.0,  parenthesis_term)))
+            current_error = abs(phi_current-phi_guess)
+            i = i + 1
+            phi_guess = phi_current 
+        end do
+        if (i >= 500) then 
+            write(*,*) "Unable to converge to phi after 500 iterations given a load factor"
+            write(*,*) "Current error"
+            write(*,*) current_error
+        end if 
+        return_phi = phi_guess 
+    end function calc_phi_from_load_factor
+
+    function calc_load_factor(this, Fxb, Fzb, alpha, mass, g, ac) result(load_factor)
+        implicit none 
+        type(vehicle_t) :: this
+        real, intent(in) :: Fxb, Fzb, alpha, mass, g, ac
+        real :: load_factor
+        load_factor = (Fxb*sin(alpha)-Fzb*cos(alpha))/(mass*(g-ac))
+    end function calc_load_factor
 
     function calc_residual(this, state, p, q, r, is_trim_sideslip_angle, trim_azimuth_angle, &
         trim_bank_angle, trim_elevation_angle, trim_sideslip_angle, trim_type) result(return_state) !!! move pqr out of loop. 
