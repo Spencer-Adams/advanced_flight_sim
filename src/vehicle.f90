@@ -4,17 +4,21 @@ module vehicle_m
     use linalg_mod
     use micro_time_m
     use connection_m
+    implicit none 
+
+    character(len=:), allocatable :: geographic_model
+    integer :: geographic_model_ID
 
     type vehicle_t
         type(json_value), pointer :: j_vehicle
         
         character(len=:), allocatable :: name
         character(len=:), allocatable :: type
-        character(100) :: states_filename, rk4_filename
+        character(100) :: states_filename, rk4_filename, geographic_filename
 
         logical :: run_physics
         logical :: save_states, rk4_verbose
-        integer :: iunit_states, iunit_rk4, iunit_trim
+        integer :: iunit_states, iunit_rk4, iunit_trim, iunit_geographic
         real :: rho0
 
         ! mass constants
@@ -51,6 +55,7 @@ module vehicle_m
         ! initialization constants
         real :: init_V, init_alt, init_state(13)
         real, allocatable :: init_eul(:) ! has to be allocatable because will be read from json object
+        real :: latitude, longitude 
 
         ! variables
         real :: state(13)
@@ -71,6 +76,7 @@ contains
         character(len=:), allocatable :: init_type 
         real, allocatable :: thrust_orientation(:)
         real :: Z_temp,T_temp,P_temp,a_temp,mu_temp
+        real :: euler_angles_init(3), azimuth_init
         this%j_vehicle => j_vehicle_input
         this%name = this%j_vehicle%name 
         write(*,*) ' Initializing ', this%name 
@@ -92,6 +98,13 @@ contains
                         "z[ft],e0,ex," // &
                         "ey,ez"
                 write(*,*) '   - saving states to ', this%states_filename
+                
+                if (geographic_model_ID > 0) then
+                    this%geographic_filename = trim(this%name)//'_geographic.csv'
+                    open(newunit=this%iunit_geographic, file = this%geographic_filename, status = 'REPLACE')
+                    write(this%iunit_geographic,*) "time[s],latitude[deg],longitude[deg],azimuth[deg]"
+                    write(*,*) '   - saving geographic data to ', this%geographic_filename
+                end if
             end if 
 
             write(*,*) '   - Initializing mass and inertia properties'
@@ -201,19 +214,31 @@ contains
             call jsonx_get(this%j_vehicle, "initial.altitude[ft]", this%init_state(9))
             this%init_state(9) = - this%init_state(9)
             this%init_alt = this%init_state(9)
+            call jsonx_get(this%j_vehicle, "initial.latitude[deg]", this%latitude, 0.0)
+            call jsonx_get(this%j_vehicle, "initial.longitude[deg]", this%longitude, 0.0)
+            this%latitude = this%latitude*PI/180.0
+            this%longitude = this%longitude*PI/180.0
             call jsonx_get(this%j_vehicle, "initial.Euler_angles[deg]", this%init_eul,0.0,3)
             this%init_eul = this%init_eul*PI/180.0
             call jsonx_get(this%j_vehicle, "initial.type", init_type)
 
             if (init_type=="state") then
                 call init_to_state(this)
+                this%init_state(10:13) = euler_to_quat(this%init_eul)
             else 
                 call init_to_trim(this)
             end if 
-            this%init_state(10:13) = euler_to_quat(this%init_eul)
             this%state = this%init_state
 
             call vehicle_write_state(this, 0.0, this%state)
+            
+            ! Write initial geographic data
+            if (geographic_model_ID > 0) then
+                euler_angles_init = quat_to_euler(this%state(10:13))
+                azimuth_init = euler_angles_init(3)
+                write(this%iunit_geographic,'(*(G0.15,:,","))') 0.0, this%latitude*180.0/PI, &
+                      this%longitude*180.0/PI, azimuth_init*180.0/PI
+            end if
 
         end if     
 
@@ -358,6 +383,7 @@ contains
             this%init_state(10:13) = euler_to_quat([trim_array(2), trim_elevation_angle, trim_azimuth_angle])
             write(*,'(A12,1X,E22.14)') "theta[deg]", trim_elevation_angle*180.0/PI
             write(*,'(A12,1X,E22.14)') "phi[deg]", trim_array(2)*180.0/PI
+            write(*,'(A12,1X,E22.14)') "psi[deg]", trim_azimuth_angle*180.0/PI
             write(*,'(A12,1X,E22.14)') "alpha[deg]", trim_array(1)*180.0/PI
             write(*,'(A12,1X,E22.14)') "beta[deg]", beta*180.0/PI
             write(*,'(A12,1X,E22.14)') "p[deg/s]", trim_array(3)*180.0/PI
@@ -372,6 +398,7 @@ contains
             this%init_state(10:13) = euler_to_quat([trim_bank_angle, trim_elevation_angle, trim_azimuth_angle])
             write(*,'(A12,1X,E22.14)') "theta[deg]", trim_elevation_angle*180.0/PI
             write(*,'(A12,1X,E22.14)') "phi[deg]", trim_bank_angle*180.0/PI
+            write(*,'(A12,1X,E22.14)') "psi[deg]", trim_azimuth_angle*180.0/PI
             write(*,'(A12,1X,E22.14)') "alpha[deg]", trim_array(1)*180.0/PI
             write(*,'(A12,1X,E22.14)') "beta[deg]", trim_array(2)*180.0/PI
             write(*,'(A12,1X,E22.14)') "p[deg/s]", trim_array(3)*180.0/PI
@@ -571,11 +598,11 @@ contains
             de = this%controls(2)
             dr = this%controls(3)
             tau = this%controls(4)
-            if (tau < 0.0) then 
-                tau = 0.0
-            else if (tau > 1.0) then 
-                tau = 1.0
-            end if 
+            ! Clamp only negative throttle values
+            ! if (tau < 0.0) then 
+            !     tau = 0.0
+            ! end if
+            ! Allow tau > 1.0 for afterburner in trim calculations
             pbar = 0.5*y(4)*this%lat_ref/(V)
             qbar = 0.5*y(5)*this%long_ref/(V)
             rbar = 0.5*y(6)*this%lat_ref/(V)
@@ -759,20 +786,150 @@ contains
         type(vehicle_t) :: this
         real, intent(in) ::  t, dt
         real :: y(13), y1(13)
+        real :: euler_angles(3), azimuth 
+        real :: print_times(3)
 
+        print_times = (/6.63,6.64,10.0/)
         y = this%state 
         y1 = runge_kutta(this,t,y,dt)
+        if (sqrt(y1(4)**2+y1(5)**2+y1(6)**2)/2.0/PI*dt>0.1) write(*,*) &
+        'Warning, rotation rates large for Rk4. See Eq. 5.7.3 in the book'
+        if (geographic_model_ID>0) call update_geographic(this,y,y1)
         call quat_norm(y1(10:13))
         this%state = y1 
-        if (sqrt(y1(4)**2+y1(5)**2+y1(6)**2)/2.0/PI*dt>0.1) then 
-            write(*,*) 'Warning, rotation rates large for Rk4. See Eq. 5.7.3 in the book'
-        end if 
-         if (this%save_states) then 
+        if (this%save_states .and. geographic_model_ID>0 .and. &
+        (abs(t+dt-print_times(1))<0.001 .or. (abs(t+dt-print_times(2))<0.001) &
+        .or. (abs(t+dt-print_times(3))<0.001))) then
+        ! if (this%save_states .and. geographic_model_ID>0) then
+            euler_angles = quat_to_euler(this%state(10:13))
+            azimuth = euler_angles(3)
+            write(this%iunit_geographic,'(*(G0.8,:,","))') t+dt, this%latitude*180.0/PI, this%longitude*180.0/PI, azimuth*180.0/PI
+        end if
+         if (this%save_states .and. &
+        (abs(t+dt-print_times(1))<0.001 .or. (abs(t+dt-print_times(2))<0.001) &
+        .or. (abs(t+dt-print_times(3))<0.001))) then
+        !  if (this%save_states) then 
             call vehicle_write_state(this, t+dt,y1)
         end if
-        ! if(rk4_verbose) then 
-        ! end if
     end subroutine vehicle_tick_state
+
+    subroutine update_geographic(this, y1, y2)
+        implicit none 
+        type(vehicle_t) :: this 
+        real, intent(in) :: y1(13)
+        real, intent(inout) :: y2(13)
+        real :: dx, dy, dz, d 
+        real :: theta, g1, xhat, yhat, zhat, xhp, yhp, zhp, rhat, Chat, Shat 
+        real :: Phi1, Psi1, H1 
+        real :: cP, cT, sP, sT, cs, cg, sg, dg
+        real :: quat(4) 
+        real :: Rp, Re, e2 
+        real :: temp, Rx, Ry, tx, ty
+
+        ! write(*,*) "state 1"
+        ! write(*,*) y1 
+        ! write(*,*) "state 2 in"
+        ! write(*,*) y2 
+
+        dx = y2(7) - y1(7)
+        dy = y2(8) - y1(8)
+        dz = y2(9) - y1(9)
+
+        d = sqrt(dx**2 + dy**2)
+        if(d<1e-14) then 
+            ! don't do anything
+        else 
+            H1 = -y1(9)
+            Phi1 = this%latitude 
+            Psi1 = this%longitude 
+            cP = cos(Phi1)
+            sP = sin(Phi1)
+            if (geographic_model_ID == 1) then ! spherical model
+                theta = d/(R_E/0.3048 + H1 - 0.5*dz)
+                cT = cos(theta)
+                sT = sin(theta)
+                g1 = atan2(dy,dx)
+                cg = cos(g1) 
+                sg = sin(g1)
+                xhat = cP*cT - sP*sT*cg 
+                yhat = sT*sg 
+                zhat = sP*cT + cP*sT*cg
+                xhp = -cP*sT - sP*cT*cg 
+                yhp = cT*sg 
+                zhp = -sP*sT +cP*cT*cg 
+                rhat = sqrt(xhat**2 + yhat**2)
+                ! write(*,*) "Latitude before", this%latitude 
+                ! write(*,*) "Longitude before", this%longitude 
+                this%latitude = atan2(zhat,rhat)
+                this%longitude = Psi1 + atan2(yhat, xhat)
+                Chat = xhat**2*zhp 
+                Shat = (xhat*yhp - yhat*xhp)*cos(this%latitude)**2*cos(this%longitude-Psi1)**2
+                dg = atan2(Shat,Chat) - g1
+                ! write(*,*) "H1", H1
+                ! write(*,*) "Phi1", Phi1
+                ! write(*,*) "Psi1", Psi1
+                ! write(*,*) "cP", cP
+                ! write(*,*) "sP", sP
+                ! write(*,*) "cT", cT
+                ! write(*,*) "sT", sT
+                ! write(*,*) "g1", g1
+                ! write(*,*) "cg", cg
+                ! write(*,*) "sg", sg
+                ! write(*,*) "xhat", xhat 
+                ! write(*,*) "yhat", yhat 
+                ! write(*,*) "zhat", zhat
+                ! write(*,*) "xhp", xhp  
+                ! write(*,*) "yhp", yhp  
+                ! write(*,*) "zhp", zhp  
+                ! write(*,*) "rhat", rhat
+                ! write(*,*) "Chat", Chat 
+                ! write(*,*) "Shat", Shat
+                ! write(*,*) "dg", dg
+
+
+            else ! ellipse  
+                Rp = 6356.7516/0.3048*1000.0
+                Re = 6378.1363/0.3048*1000.0
+                e2 = 1.0 - (Rp/Re)**2 
+                temp = 1.0 - e2*sin(Phi1)**2 
+                Rx = Re*(1.0-e2)/(temp**1.5)
+                Ry = Re/(temp**0.5)
+                tx = dx/(Rx + H1 - 0.5*dz)
+                ty = dy/(Ry + H1 - 0.5*dz)
+                xhat = (1.0-e2)*(cos(Phi1 + tx) - cos(Phi1)) + temp*cos(ty)*cos(Phi1)
+                yhat = temp*sin(ty)
+                zhat = (1.0-e2)*(sin(Phi1 + tx) - sin(Phi1)) + temp*(cos(ty)-e2)*sin(Phi1)
+                rhat = sqrt(xhat**2 + yhat**2) 
+                this%latitude = atan2(zhat, (1.0-e2)*rhat)
+                this%longitude = Psi1 + atan2(yhat, xhat) 
+
+                dg = (this%longitude - Psi1)*sin(0.5*(this%latitude + Phi1))*(1.0 - e2)/temp
+            end if 
+            
+            if(this%longitude > PI) this%longitude = this%longitude - 2.0*PI 
+            if(this%longitude < -PI) this%longitude = this%longitude + 2.0*PI 
+
+            ! write(*,*) "Latitude after", this%latitude 
+            ! write(*,*) "Longitude after", this%longitude 
+
+            cg = cos(0.5*dg)
+            sg = sin(0.5*dg)
+            
+            ! write(*,*) "cg second", cg
+            ! write(*,*) "sg second", sg
+
+            quat(1) = -y2(13)
+            quat(2) = -y2(12)
+            quat(3) =  y2(11)
+            quat(4) =  y2(10)
+            y2(10:13) = cg*y2(10:13) + sg*quat(:)
+            
+            ! write(*,*)
+            ! write(*,*) "state 2 out"
+            ! write(*,*) y2 
+
+        end if 
+    end subroutine update_geographic
 
     subroutine vehicle_write_state(this, time, state)
         implicit none 
@@ -890,7 +1047,8 @@ contains
         real :: phi_lf_convergence_tol
         integer :: k_lf
         real :: xdot_temp(3), euler_temp(3), qt(4)
-
+        write(*,*) ""
+        write(*,*) "Beginning trim algorithm..."
         gravity = gravity_English(-H_altitude)
         alpha = 0.0
         allocate(DeltaG(6))
@@ -961,6 +1119,18 @@ contains
                 xdot_temp = quat_dependent_to_base((/u,v,w/), (/qt(1), qt(2), qt(3), qt(4)/))        
                 v_t = sqrt(xdot_temp(1)**2+xdot_temp(2)**2)
                 a_c = v_t**2/(R_E_English - z)
+                ! Check for potential divide-by-zero
+                if (abs(u*cos(theta)*cos(phi)+w*sin(theta)) < 1.0e-10) then
+                    write(*,*) "WARNING: Near-zero denominator in sct_pqr_coeff calculation!"
+                    write(*,*) "  u=", u, " w=", w, " theta[deg]=", theta*180.0/PI, " phi[deg]=", phi*180.0/PI
+                    write(*,*) "  Denominator=", u*cos(theta)*cos(phi)+w*sin(theta)
+                end if
+                ! Check for potential divide-by-zero
+                if (abs(u*cos(theta)*cos(phi)+w*sin(theta)) < 1.0e-10) then
+                    write(*,*) "WARNING: Near-zero denominator in sct_pqr_coeff calculation!"
+                    write(*,*) "  u=", u, " w=", w, " theta[deg]=", theta*180.0/PI, " phi[deg]=", phi*180.0/PI
+                    write(*,*) "  Denominator=", u*cos(theta)*cos(phi)+w*sin(theta)
+                end if
                 sct_pqr_coeff = (gravity-a_c)*sin(phi)*cos(theta)/(u*cos(theta)*cos(phi)+w*sin(theta))
                 p = -sct_pqr_coeff*(sin(theta))
                 q = sct_pqr_coeff*(sin(phi)*cos(theta))
@@ -978,16 +1148,19 @@ contains
         current_error = 100.0
         if (trim_type == "shss" .and. is_trim_sideslip_angle) then
                 newton_input = [alpha, phi, da, de, dr, tau]
+                write(*,*) "newton initial input", newton_input
             else
                 newton_input = [alpha, beta, da, de, dr, tau]
+                write(*,*) "newton initial input", newton_input
         end if
         j = 1
         do while(current_error > newton_tol)
-            if (newton_input(6) < 0.0) then 
-                newton_input(6) = 0.0
-            else if (newton_input(6) > 1.0) then 
-                newton_input(6) = 1.0
-            end if 
+            ! Temporarily disable throttle clamping to diagnose convergence issue
+            ! if (newton_input(6) < 0.0) then 
+            !     newton_input(6) = 0.0
+            ! else if (newton_input(6) > 1.0) then 
+            !     newton_input(6) = 1.0
+            ! end if 
             alpha = newton_input(1)
             if (trim_type == "shss" .and. is_trim_sideslip_angle) then 
                 beta = trim_sideslip_angle
@@ -1062,9 +1235,21 @@ contains
             residual = calc_residual(this, newton_input, p, q, r, is_trim_sideslip_angle, &
                         trim_azimuth_angle, trim_bank_angle, trim_elevation_angle, trim_sideslip_angle, trim_type)
             current_error = maxval(abs(residual))
+            ! give diagnostic every 10 iterations and then every 100 iterations after 100 iterations
+            if ((j <= 100 .and. mod(j,10) == 0) .or. (j > 100 .and. mod(j,100) == 0)) then
+                write(*,'(A,I5,A,E12.5,A,6E12.4)') "Iter ", j, " Error: ", current_error, &
+                    " State: ", newton_input(1)*180./PI, newton_input(2)*180./PI, newton_input(3:6)
+            end if
             j = j + 1
+            if (j > 1000) then
+                write(*,*) "WARNING: Exceeded 1000 iterations without convergence!"
+                write(*,*) "Current error:", current_error, " Tolerance:", newton_tol
+                exit
+            end if
         end do 
-        alpha = newton_input(1)
+        write(*,*) "Trim converged!"
+        write(*,*) "Converged in ", j-1, " iterations with error ", current_error
+        alpha = newton_input(1) 
         beta = newton_input(2)
         da = newton_input(3)
         de = newton_input(4)
@@ -1115,6 +1300,13 @@ contains
         error_for_elevation = 1e-12
         temp_lhs = this%init_V*sin(trim_climb_angle)
         parenth_temp = v*sin(phi)+w*cos(phi)
+        ! Check for negative value under square root
+        if (u**2 + parenth_temp**2 - this%init_V**2*sin(trim_climb_angle)**2 < 0.0) then
+            write(*,*) "ERROR: Negative value under square root in calc_theta_from_climb_angle!"
+            write(*,*) "  u=", u, " parenth_temp=", parenth_temp
+            write(*,*) "  init_V=", this%init_V, " climb_angle[deg]=", trim_climb_angle*180.0/PI
+            write(*,*) "  Value under sqrt=", u**2 + parenth_temp**2 - this%init_V**2*sin(trim_climb_angle)**2
+        end if
         S_theta_1 = (u*this%init_V*sin(trim_climb_angle)+parenth_temp*sqrt(u**2 + parenth_temp**2 - &
         this%init_V**2*sin(trim_climb_angle)**2))/(u**2 + parenth_temp**2)
         theta_1 = asin(S_theta_1)
@@ -1211,6 +1403,11 @@ contains
         gravity = gravity_English(-z)
         x = 0.0
         y = 0.0
+        ! Diagnostic output
+        if (abs(state(1)) > 1.0) then  ! alpha > ~57 degrees is suspicious
+            write(*,*) "WARNING: Large alpha in calc_residual: alpha[deg]=", state(1)*180.0/PI
+            write(*,*) "  Full state:", state
+        end if
         alpha = state(1)
         if (trim_type == "shss" .and. is_trim_sideslip_angle) then 
             beta = trim_sideslip_angle 
@@ -1226,9 +1423,9 @@ contains
         tau = state(6)
         ! if (tau < 0.0) then 
             ! tau = 0.0
-        if (tau > 1.0) then 
-            tau = 1.0
-        end if 
+        ! if (tau > 1.0) then 
+        !     tau = 1.0
+        ! end if 
         u = this%init_V*cos(alpha)*cos(beta)
         v = this%init_V*sin(beta)
         w = this%init_V*sin(alpha)*cos(beta) 
@@ -1250,6 +1447,8 @@ contains
         ! write(*,*) "full_state" 
         ! write(*,*) full_state
         return_state(1:6) = full_state(1:6)
+        ! Uncomment for detailed residual debugging:
+        ! write(*,'(A,6E15.6)') "  Residuals [udot,vdot,wdot,pdot,qdot,rdot]: ", return_state
     end function calc_residual
 
     function create_jacobian(this, states, step_size, p, q, r, is_trim_sideslip_angle, &

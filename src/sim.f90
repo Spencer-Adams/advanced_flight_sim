@@ -15,8 +15,6 @@ module sim_m
     logical :: save_states, rk4_verbose
     type(connection) :: graphics, connect_controls 
     type(json_value), pointer :: j_main
-    real :: gravity_relief_factor
-
     ! aero coefficients 
     integer :: newton_max_iter
 contains
@@ -90,14 +88,15 @@ contains
         ! type2, intent(out) ::  arg2
         call jsonx_load(filename, j_main)
         ! global settings 
-        ! gravity relief stuff here 
-        gravity_relief_factor = 1.0
-
         ! write(*,*) 'Reading atmosphere object in json'
         ! call jsonx_get(j_main, 'atmosphere', j_atmosphere)
 
         call jsonx_get(j_main, 'simulation.rk4_verbose', rk4_verbose, .false.)
         call jsonx_get(j_main, 'simulation.save_states', save_states, .true.)
+        call jsonx_get(j_main, 'simulation.geographic_model', geographic_model, 'none')
+        geographic_model_ID = 0
+        if (geographic_model == 'sphere') geographic_model_ID = 1
+        if (geographic_model == 'ellipse') geographic_model_ID = 2
         
         write(*,*) 'Initializing vehicles'
         call jsonx_get(j_main, 'vehicles', j_vehicles)
