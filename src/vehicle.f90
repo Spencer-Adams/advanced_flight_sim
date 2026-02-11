@@ -9,6 +9,16 @@ module vehicle_m
     character(len=:), allocatable :: geographic_model
     integer :: geographic_model_ID
 
+    type control_t 
+        character(len=:), allocatable :: name 
+        character(len=:), allocatable :: units 
+        integer :: dynamics_order, state_ID
+        real :: commanded_value 
+        real, allocatable :: mag_limit(:), rate_limit(:), accel_limit(:)
+        real :: time_constant, nat_freq, damp_ratio 
+        real :: display_units = 1.0
+    end type control_t
+
     type vehicle_t
         type(json_value), pointer :: j_vehicle
         
@@ -20,6 +30,8 @@ module vehicle_m
         logical :: save_states, rk4_verbose
         integer :: iunit_states, iunit_rk4, iunit_trim, iunit_geographic
         real :: rho0
+        logical :: limit_controls = .true.
+        integer :: aileron_ID, elevator_ID, rudder_ID, throttle_ID
 
         ! mass constants
         real :: mass
@@ -53,23 +65,26 @@ module vehicle_m
         real :: alpha_0Cm, alpha_sCm, Cmmin
 
         ! initialization constants
-        real :: init_V, init_alt, init_state(13)
+        real :: init_V, init_alt, init_state(21)
         real, allocatable :: init_eul(:) ! has to be allocatable because will be read from json object
         real :: latitude, longitude 
 
         ! variables
-        real :: state(13)
-        real :: controls(4)
+        real :: state(21)
+        type(control_t) :: controls(4)
 
         ! type(trim_settings_t) :: trim
 
     end type vehicle_t
+
+
+
 contains 
 
     subroutine vehicle_init(this, j_vehicle_input, is_save_states, is_rk4_verbose)
         implicit none 
         type(vehicle_t) :: this 
-        type(json_value), pointer :: j_vehicle_input
+        type(json_value), pointer :: j_vehicle_input, j_control, j_control_temp
         logical, intent(in) :: is_save_states, is_rk4_verbose
         real :: denom 
         logical :: is_straight_fletchings
@@ -96,7 +111,8 @@ contains
                         "w[ft/s],p[rad/s],q[rad/s],"  // &
                         "r[rad/s],x[ft],y[ft]," // &                   
                         "z[ft],e0,ex," // &
-                        "ey,ez"
+                        "ey,ez,aileron[deg],elevator[deg],rudder[deg],throttle," // &
+                        "aileron_dot[rad/s],elevator_dot[rad/s],rudder_dot[rad/s],throttle_dot"
                 write(*,*) '   - saving states to ', this%states_filename
                 
                 if (geographic_model_ID > 0) then
@@ -183,6 +199,18 @@ contains
                 call jsonx_get(this%j_vehicle, "aerodynamics.coefficients.Cn.aileron", this%Cnda)
                 call jsonx_get(this%j_vehicle, "aerodynamics.coefficients.Cn.alpha_aileron", this%Cnada)
                 call jsonx_get(this%j_vehicle, "aerodynamics.coefficients.Cn.rudder", this%Cndr)
+            
+                ! control effectors 
+                write(*,*) '  - controls'
+                call jsonx_get(this%j_vehicle, 'control_effectors', j_control)
+                call jsonx_get(j_control, '1', j_control_temp)
+                call init_control(this, j_control_temp,1)
+                call jsonx_get(j_control, '2', j_control_temp)
+                call init_control(this, j_control_temp,2)
+                call jsonx_get(j_control, '3', j_control_temp)
+                call init_control(this, j_control_temp,3)
+                call jsonx_get(j_control, '4', j_control_temp)
+                call init_control(this, j_control_temp,4)
             end if 
             
             if(this%type == 'arrow' .or. this%type == 'aircraft') then 
@@ -222,16 +250,26 @@ contains
             this%init_eul = this%init_eul*PI/180.0
             call jsonx_get(this%j_vehicle, "initial.type", init_type)
 
-            if (init_type=="state") then
+            if (init_type=="state") then 
                 call init_to_state(this)
                 this%init_state(10:13) = euler_to_quat(this%init_eul)
             else 
                 call init_to_trim(this)
             end if 
+
+            !!!! Change commanded deflection values to 0.0
+            this%controls(1)%commanded_value = 0.0
+            this%controls(2)%commanded_value = 0.0
+            this%controls(3)%commanded_value = 0.0
+            this%controls(4)%commanded_value = 0.0
+            
             this%state = this%init_state
 
-            call vehicle_write_state(this, 0.0, this%state)
-            
+
+            if (this%save_states) then
+                call vehicle_write_state(this, 0.0, this%state)
+            end if 
+
             ! Write initial geographic data
             if (geographic_model_ID > 0) then
                 euler_angles_init = quat_to_euler(this%state(10:13))
@@ -249,6 +287,8 @@ contains
         type(vehicle_t) :: this
         type(json_value), pointer :: j_initial, j_state 
         real :: alpha, beta
+        real, allocatable :: temp_controls(:)
+        integer :: i 
         write(*,*) ' Setting State'
         call jsonx_get(this%j_vehicle, 'initial', j_initial)
         call jsonx_get(j_initial, 'state', j_state)
@@ -264,14 +304,13 @@ contains
         call jsonx_get(j_state, 'q[deg/s]', this%init_state(5))
         call jsonx_get(j_state, 'r[deg/s]', this%init_state(6))
         this%init_state(4:6) = this%init_state(4:6)*PI/180.0
-
-        this%controls(:) = 0.0
+        ! this%controls(:) = 0.0
         if (this%type == 'aircraft') then 
-            call jsonx_get(j_state, 'aileron[deg]', this%controls(1))
-            call jsonx_get(j_state, 'elevator[deg]', this%controls(2))
-            call jsonx_get(j_state, 'rudder[deg]', this%controls(3))
-            call jsonx_get(j_state, 'throttle', this%controls(4))
-            this%controls(1:3) = this%controls(1:3)*PI/180.0
+            call jsonx_get(j_state, 'controls', temp_controls, 0.0, 4)
+            do i =1,4
+                this%init_state(i + 13) = temp_controls(i)/this%controls(i)%display_units
+                this%controls(i)%commanded_value = this%init_state(i + 13)
+            end do 
         end if 
     end subroutine init_to_state
 
@@ -285,10 +324,13 @@ contains
         real :: trim_load_factor, load_factor_temp, gravity_temp, a_c_temp
         real :: qt_temp(4), euler_temp(3), xdot_temp(3), v_t_temp
         real :: trim_climb_angle, finite_diff_step, relax_factor, newton_tol
-        integer :: newton_max_iter
+        integer :: newton_max_iter, i
         logical :: is_trim_sideslip_angle, is_trim_sct_load_factor
         character(:), allocatable :: is_elevation_or_climb, trim_type, is_bank_or_beta_for_shss
         character(:), allocatable :: is_bank_or_load_factor_for_sct
+
+
+        this%limit_controls = .false.
 
         write(*,*) ' Setting trim'
         call jsonx_get(this%j_vehicle, 'initial', j_initial)
@@ -414,7 +456,11 @@ contains
         this%init_state(2) = this%init_V*sin(beta)
         this%init_state(3) = this%init_V*sin(alpha)*cos(beta)
         this%init_state(4:6) = trim_array(3:5)
-        this%controls(1:4) = trim_array(6:9) 
+
+        do i = 1,4
+            this%controls(i)%commanded_value = trim_array(5+i) 
+            this%init_state(13 + i) = this%controls(i)%commanded_value
+        end do 
 
         load_factor_temp = 0.0
         ! get load factor from that 
@@ -432,8 +478,59 @@ contains
             load_factor_temp = calc_load_factor(this, this%FM(1), this%FM(3), alpha, this%mass, gravity_temp, a_c_temp)
             write(*,*) "Load Factor: ", load_factor_temp
         end if 
-
+        this%limit_controls = .true. 
     end subroutine init_to_trim
+
+    subroutine init_control(this, j_control, ID)
+        implicit none 
+        type(vehicle_t) :: this 
+        type(json_value), pointer :: j_control 
+        integer :: ID 
+
+        call jsonx_get(j_control, 'name', this%controls(ID)%name)
+        write(*,*) '             reading control effector : ', this%controls(ID)%name 
+
+        if (this%controls(ID)%name == 'aileron') this%aileron_ID=ID+13 
+        if (this%controls(ID)%name == 'elevator') this%elevator_ID=ID+13 
+        if (this%controls(ID)%name == 'rudder') this%rudder_ID=ID+13 
+        if (this%controls(ID)%name == 'throttle') this%throttle_ID=ID+13
+        
+        call jsonx_get(j_control,'dynamics_order',this%controls(ID)%dynamics_order,0) ! defaults to zero
+        call jsonx_get(j_control,'units',this%controls(ID)%units,'none') ! defaults to none 
+        if (this%controls(ID)%units == 'deg') then 
+            this%controls(ID)%display_units = 180.0/PI 
+        else 
+            this%controls(ID)%display_units = 1.0
+        end if 
+        call jsonx_get(j_control, 'magnitude_limits', this%controls(ID)%mag_limit,0.0,2)
+        this%controls(ID)%mag_limit(:) = this%controls(ID)%mag_limit(:)/this%controls(ID)%display_units
+        
+        ! First-Order Dynamics 
+        if (this%controls(ID)%dynamics_order == 1) then 
+            call jsonx_get(j_control, 'rate_limits[/s]', this%controls(ID)%rate_limit,0.0,2)
+            this%controls(ID)%rate_limit(:) = this%controls(ID)%rate_limit(:)&
+            /this%controls(ID)%display_units
+            call jsonx_get(j_control, 'time_constant[s]', this%controls(ID)%time_constant)
+        end if 
+
+        ! Second-Order Dynamics 
+        if (this%controls(ID)%dynamics_order == 2) then 
+            call jsonx_get(j_control, 'rate_limits[/s]', this%controls(ID)%rate_limit,0.0,2)
+            this%controls(ID)%rate_limit(:) = this%controls(ID)%rate_limit(:)&
+            /this%controls(ID)%display_units
+            
+            call jsonx_get(j_control, 'acceleration_limits[/s^2]', this%controls(ID)%accel_limit,0.0,2)
+            this%controls(ID)%accel_limit(:) = this%controls(ID)%accel_limit(:)&
+            /this%controls(ID)%display_units
+
+            call jsonx_get(j_control, 'natural_frequency[rad/s]', this%controls(ID)%nat_freq)
+            call jsonx_get(j_control, 'damping_ratio', this%controls(ID)%damp_ratio)
+        end if 
+        
+        this%controls(ID)%state_ID = 13 + ID 
+        this%controls(ID)%commanded_value = 0.0 
+        
+    end subroutine init_control
 
     subroutine mass_inertia(this) 
         implicit none 
@@ -571,7 +668,7 @@ contains
     subroutine pseudo_aero(this, y) 
         implicit none
         type(vehicle_t) :: this
-        real, intent(in) :: y(13)
+        real, intent(in) :: y(21)
         real :: da, de, dr, tau
         real :: V, alpha, beta, pbar, qbar, rbar, ahat
         real :: CL1, CL, CS, CD, Cll, Cm, Cn 
@@ -594,15 +691,18 @@ contains
         if (this%type == "aircraft") then 
             ahat = 0.0
             !!!! receive controls from python script here !!!!
-            da = this%controls(1)
-            de = this%controls(2)
-            dr = this%controls(3)
-            tau = this%controls(4)
-            ! Clamp only negative throttle values
-            ! if (tau < 0.0) then 
-            !     tau = 0.0
-            ! end if
-            ! Allow tau > 1.0 for afterburner in trim calculations
+            if (this%limit_controls) then 
+                da = max(this%controls(1)%mag_limit(1),min(this%controls(1)%mag_limit(2),y(this%aileron_ID)))
+                de = max(this%controls(2)%mag_limit(1),min(this%controls(2)%mag_limit(2),y(this%elevator_ID)))
+                dr = max(this%controls(3)%mag_limit(1),min(this%controls(3)%mag_limit(2),y(this%rudder_ID)))
+                tau = max(this%controls(4)%mag_limit(1),min(this%controls(4)%mag_limit(2),y(this%throttle_ID)))
+            else 
+                da = y(this%aileron_ID)
+                de = y(this%elevator_ID)
+                dr = y(this%rudder_ID)
+                tau = y(this%throttle_ID)
+            end if 
+
             pbar = 0.5*y(4)*this%lat_ref/(V)
             qbar = 0.5*y(5)*this%long_ref/(V)
             rbar = 0.5*y(6)*this%lat_ref/(V)
@@ -715,6 +815,8 @@ contains
         real :: e0,ex,ey,ez
         real, dimension(3) :: pqr_temp, rot_and_inertia_temp
         real :: gravity, a_c, v_t
+        real :: delta, d_delta, dd_delta, wn, zeta 
+        integer :: i 
         u = state(1)
         v = state(2)
         w = state(3)
@@ -752,22 +854,56 @@ contains
         res(11) = 0.5 * dot_product((/e0, -ez, ey/),pqr_temp) !ex
         res(12) = 0.5 * dot_product((/ez, e0, -ex/),pqr_temp) !ey
         res(13) = 0.5 * dot_product((/-ey, ex, e0/),pqr_temp) !ez
+
+        ! now do actuator dynamics stuff to adjust res(10:13)
+        do i = 1,4 
+            delta = state(13 + i)
+            d_delta = state(17 + i)
+            delta = max(min(this%controls(i)%mag_limit(2), delta), this%controls(i)%mag_limit(1)) ! mag limit 
+
+            ! compute dynamics 
+            select case (this%controls(i)%dynamics_order) ! delta in 14, 15, 16, 17. delta_dot in 18, 19, 20, 21 
+
+            case (0) ! no actuator dynamics 
+                d_delta = 0.0
+                dd_delta = 0.0
+            
+            case (1) ! first-order actuator dynamics 
+                d_delta = (this%controls(i)%commanded_value-delta)/this%controls(i)%time_constant
+                d_delta = max(min(this%controls(i)%rate_limit(2), d_delta), this%controls(i)%rate_limit(1)) ! rate limit 
+                ! deflection limit consistency 
+                if (delta <= this%controls(i)%mag_limit(1) + TOLERANCE .and. d_delta < 0.0) d_delta = 0.0
+                if (delta >= this%controls(i)%mag_limit(2) - TOLERANCE .and. d_delta > 0.0) d_delta = 0.0
+                dd_delta = 0.0
+
+            case (2) ! second-order actuator dynamics 
+                wn = this%controls(i)%nat_freq 
+                zeta = this%controls(i)%damp_ratio
+                d_delta = max(min(this%controls(i)%rate_limit(2), d_delta), this%controls(i)%rate_limit(1)) ! rate limit 
+                if (delta <= this%controls(i)%mag_limit(1) + TOLERANCE .and. d_delta < 0.0) d_delta = 0.0
+                if (delta >= this%controls(i)%mag_limit(2) - TOLERANCE .and. d_delta > 0.0) d_delta = 0.0
+                
+                dd_delta = wn**2*(this%controls(i)%commanded_value - delta) - 2.0*zeta*wn*d_delta
+                dd_delta = max(min(this%controls(i)%accel_limit(2), dd_delta), this%controls(i)%accel_limit(1)) ! acceleration limit 
+                
+                ! rate limit consistency 
+                if (d_delta <= this%controls(i)%rate_limit(1) + TOLERANCE .and. dd_delta < 0.0) dd_delta = 0.0
+                if (d_delta >= this%controls(i)%rate_limit(2) - TOLERANCE .and. dd_delta > 0.0) dd_delta = 0.0
+
+                ! position limit consistency 
+                if (delta <= this%controls(i)%mag_limit(1) + TOLERANCE .and. &
+                    this%controls(i)%commanded_value <= this%controls(i)%mag_limit(1) + TOLERANCE) dd_delta = 0.0
+                if (delta >= this%controls(i)%mag_limit(2) - TOLERANCE .and. &
+                    this%controls(i)%commanded_value >= this%controls(i)%mag_limit(2) - TOLERANCE) dd_delta = 0.0
+            end select
+
+            res(13 + i) = d_delta 
+            res(17 + i) = dd_delta 
+        end do 
+        
         if (this%rk4_verbose) then
             write(*,*) " | diff eq results = "
             write(*,'(14E22.13)') res
-            ! write(*,*) ""
-            ! write(*,*) "pqr", pqr_temp
-            ! write(*,*) "h_gyro", this%h_gyro
-            ! write(*,*) "hdot_gyro", this%hdot_gyro
-            ! write(*,*) "I", this%I
-            ! write(*,*) "Iinv", this%Iinv
-            ! write(*,*) "Ixxb", this%Ixxb
-            ! write(*,*) "Iyyb", this%Iyyb
-            ! write(*,*) "Izzb", this%Izzb
-            ! write(*,*) "Iyzb", this%Iyzb
-            ! write(*,*) "Ixzb", this%Ixzb
-            ! write(*,*) "Ixyb", this%Ixyb
-            ! write(*,*) "rot_and_inertia_temp", rot_and_inertia_temp
             write(*,*) ""
         end if
     end function differential_equations
@@ -785,30 +921,37 @@ contains
         implicit none 
         type(vehicle_t) :: this
         real, intent(in) ::  t, dt
-        real :: y(13), y1(13)
+        real :: y(21), y1(21)
         real :: euler_angles(3), azimuth 
         real :: print_times(3)
+        integer :: i 
 
         print_times = (/6.63,6.64,10.0/)
         y = this%state 
         y1 = runge_kutta(this,t,y,dt)
         if (sqrt(y1(4)**2+y1(5)**2+y1(6)**2)/2.0/PI*dt>0.1) write(*,*) &
         'Warning, rotation rates large for Rk4. See Eq. 5.7.3 in the book'
+
+        do i = 1,4
+            y1(13+i) = max(min(y1(13+i), this%controls(i)%mag_limit(2)), this%controls(i)%mag_limit(1))
+            y1(17+i) = max(min(y1(17+i), this%controls(i)%rate_limit(2)), this%controls(i)%rate_limit(1))
+        end do 
+
         if (geographic_model_ID>0) call update_geographic(this,y,y1)
         call quat_norm(y1(10:13))
         this%state = y1 
-        if (this%save_states .and. geographic_model_ID>0 .and. &
-        (abs(t+dt-print_times(1))<0.001 .or. (abs(t+dt-print_times(2))<0.001) &
-        .or. (abs(t+dt-print_times(3))<0.001))) then
-        ! if (this%save_states .and. geographic_model_ID>0) then
+        ! if (this%save_states .and. geographic_model_ID>0 .and. &
+            ! (abs(t+dt-print_times(1))<0.001 .or. (abs(t+dt-print_times(2))<0.001) &
+            ! .or. (abs(t+dt-print_times(3))<0.001))) then
+        if (this%save_states .and. geographic_model_ID>0) then
             euler_angles = quat_to_euler(this%state(10:13))
             azimuth = euler_angles(3)
             write(this%iunit_geographic,'(*(G0.8,:,","))') t+dt, this%latitude*180.0/PI, this%longitude*180.0/PI, azimuth*180.0/PI
         end if
-         if (this%save_states .and. &
-        (abs(t+dt-print_times(1))<0.001 .or. (abs(t+dt-print_times(2))<0.001) &
-        .or. (abs(t+dt-print_times(3))<0.001))) then
-        !  if (this%save_states) then 
+        !  if (this%save_states .and. &
+        ! (abs(t+dt-print_times(1))<0.001 .or. (abs(t+dt-print_times(2))<0.001) &
+        ! .or. (abs(t+dt-print_times(3))<0.001))) then
+         if (this%save_states) then 
             call vehicle_write_state(this, t+dt,y1)
         end if
     end subroutine vehicle_tick_state
@@ -816,8 +959,8 @@ contains
     subroutine update_geographic(this, y1, y2)
         implicit none 
         type(vehicle_t) :: this 
-        real, intent(in) :: y1(13)
-        real, intent(inout) :: y2(13)
+        real, intent(in) :: y1(21)
+        real, intent(inout) :: y2(21)
         real :: dx, dy, dz, d 
         real :: theta, g1, xhat, yhat, zhat, xhp, yhp, zhp, rhat, Chat, Shat 
         real :: Phi1, Psi1, H1 
@@ -934,13 +1077,13 @@ contains
     subroutine vehicle_write_state(this, time, state)
         implicit none 
         type(vehicle_t) :: this
-        real, intent(in) :: time, state(13)
+        real, intent(in) :: time, state(21)
         logical :: is_open
         ! inquire(file=this%states_filename, opened = is_open)
         ! if (is_open) then 
             ! write(*,*) this%states_filename, ' is already open. THIS PROGRAM WILL NOT RUN IF THAT IS NOT CLOSED'
         ! else 
-        write(this%iunit_states,'(*(G0.15,:,","))') time, state
+        write(this%iunit_states,'(*(G0.15,:,","))') time, state(1:13), state(14:16)*180.0/PI, state(17:21)
         ! end if 
     end subroutine vehicle_write_state
 
@@ -951,8 +1094,8 @@ contains
         real, intent(in), dimension(:) :: state
         real, intent(in) :: delta_t
         real :: state_out(size(state))
-        real :: k1(13), k2(13), k3(13), k4(13)
-        real :: state_temp(13)
+        real :: k1(21), k2(21), k3(21), k4(21)
+        real :: state_temp(21)
         real :: t_0_plus_delta_t_over_2, delta_t_over_2
         delta_t_over_2 = delta_t/2.0
         if (this%rk4_verbose) then
@@ -1393,7 +1536,7 @@ contains
         logical, intent(in) :: is_trim_sideslip_angle
         character(len=*), intent(in) :: trim_type
         real :: return_state(6)
-        real :: full_state_temp(13), full_state(13)
+        real :: full_state_temp(21), full_state(21)
         real :: phi, theta, psi, e0, ex, ey, ez
         real :: quaternion(4)
         real :: alpha, beta,  da, de, dr
@@ -1431,17 +1574,18 @@ contains
         w = this%init_V*sin(alpha)*cos(beta) 
         psi = trim_azimuth_angle
         theta = trim_elevation_angle
-        this%controls(1) = da
-        this%controls(2) = de 
-        this%controls(3) = dr 
-        this%controls(4) = tau
+        this%controls(1)%commanded_value = da
+        this%controls(2)%commanded_value = de
+        this%controls(3)%commanded_value = dr
+        this%controls(4)%commanded_value = tau
 
         quaternion = euler_to_quat([phi,theta,psi])
         e0 = quaternion(1)
         ex = quaternion(2)
         ey = quaternion(3)
         ez = quaternion(4)
-        full_state_temp = [u,v,w,p,q,r,x,y,z,e0,ex,ey,ez]
+        ! For trim: deltas = control values, delta_dots = 0 (steady-state)
+        full_state_temp = [u,v,w,p,q,r,x,y,z,e0,ex,ey,ez,da,de,dr,tau,0.0,0.0,0.0,0.0]
         ! write(*,*) "full_state_temp", full_state_temp
         full_state = differential_equations(this, 0.0, full_state_temp)
         ! write(*,*) "full_state" 
