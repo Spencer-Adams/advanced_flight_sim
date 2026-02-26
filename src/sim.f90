@@ -1,9 +1,9 @@
 module sim_m
-    use adams_m
-    use jsonx_m
-    use linalg_mod
-    use micro_time_m
-    use connection_m
+    ! use adams_m
+    ! use jsonx_m
+    ! use linalg_mod
+    ! use micro_time_m
+    ! use connection_m
     use vehicle_m
     implicit none
     ! Variables within sim_m

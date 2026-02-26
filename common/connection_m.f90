@@ -3,6 +3,7 @@ module connection_m
     use iso_c_binding
     use jsonx_m
     use database_m, only: database, new_database, char_length, int2str
+    ! use io_m, only: zTimer
     implicit none
     
     
@@ -71,7 +72,7 @@ module connection_m
         ! real, allocatable :: vals(:)
         class(channel), allocatable :: ch
         ! type(zTimer) :: refresh
-        real :: refresh_time, time
+        real :: refresh_time, time, duration
         ! logical :: only_send
     contains
         procedure :: init          => connection_init
@@ -90,7 +91,8 @@ contains
         character(len=:), allocatable :: char_temp
         
         if (present(n)) then
-            t%n = n
+            call jsonx_get(p, 'number_of_values', t%n, n)
+            ! t%n = n
         else
             call jsonx_get(p, 'number_of_values', t%n)
         end if
@@ -103,8 +105,8 @@ contains
             allocate(t%vals(t%n))
             t%vals = 0.
         else
-            write(*,*) 'Error initializing channel &
-            '//trim(p%name)//'. Type not recognized as either send or receive! Quitting...'
+            write(*,*) 'Error initializing channel '//trim(p%name)//&
+            '. Type not recognized as either send or receive! Quitting...'
             stop
         end if
         deallocate(char_temp)
@@ -124,8 +126,8 @@ contains
         
         call jsonx_get(p, 'channel_type', char_temp)
         if (char_temp /= 'udp' .and. char_temp /= 'UDP') then
-            write(*,*) 'Error initializing channel '//trim(p%name)//'&
-            . Initializing as UDP channel but channel_type does not match! Quitting...'
+            write(*,*) 'Error initializing channel '//trim(p%name)// &
+            '. Initializing as UDP channel but channel_type does not match! Quitting...'
             stop
         end if
         deallocate(char_temp)
@@ -149,8 +151,8 @@ contains
         real, intent(in) :: vals(t%n)
         
         if (.not. t%only_send) then
-            write(*,*) 'Error with UDP channel port '//int2str(t%port)//'&
-            . Attempting to send data, but channel setup as receive only! Quitting...'
+            write(*,*) 'Error with UDP channel port '//int2str(t%port)//&
+            '. Attempting to send data, but channel setup as receive only! Quitting...'
             stop
         end if
         
@@ -171,8 +173,8 @@ contains
         logical :: flag
         
         if (t%only_send) then
-            write(*,*) 'Error with UDP channel port '//int2str(t%port)//'&
-            . Attempting to receive data, but channel setup as send only! Quitting...'
+            write(*,*) 'Error with UDP channel port '//int2str(t%port)//&
+            '. Attempting to receive data, but channel setup as send only! Quitting...'
             stop
         end if
         
@@ -229,8 +231,8 @@ contains
         
         call jsonx_get(p, 'channel_type', char_temp)
         if (char_temp /= 'file') then
-            write(*,*) 'Error initializing channel '//trim(p%name)//'.&
-             Initializing as file channel but channel_type does not match! Quitting...'
+            write(*,*) 'Error initializing channel '//trim(p%name)//&
+            '. Initializing as file channel but channel_type does not match! Quitting...'
             stop
         end if
         deallocate(char_temp)
@@ -263,8 +265,8 @@ contains
                 t%db = new_database(char_temp, t%fn)
             end if
             if (t%n /= t%db%n_dv) then
-                write(*,*) 'Error initializing file receive channel &
-                '//trim(p%name)//'. Database output does not match expected amount of values! Quitting...'
+                write(*,*) 'Error initializing file receive channel '//trim(p%name)//&
+                '. Database output does not match expected amount of values! Quitting...'
                 stop
             end if
         end if
@@ -294,19 +296,19 @@ contains
         real :: dummy
         
         if (t%only_send) then
-            write(*,*) 'Error with file channel to file '//trim(t%fn)//'&
-            . Attempting to receive data, but channel setup as send only! Quitting...'
+            write(*,*) 'Error with file channel to file '//trim(t%fn)//&
+            '. Attempting to receive data, but channel setup as send only! Quitting...'
             stop
         end if
         if (.not. present(x)) then
-            write(*,*) 'Error with file channel to file '//trim(t%fn)//'.&
-             Attempting to interpolate database, but independent variable values not given! Quitting...'
+            write(*,*) 'Error with file channel to file '//trim(t%fn)//&
+            '. Attempting to interpolate database, but independent variable values not given! Quitting...'
             stop
         end if
         if (size(x) /= t%db%n_iv) then
-            write(*,*) 'Error with file channel to file '//trim(t%fn)//'.&
-             Attempting to interpolate database, but only received &
-             '//int2str(size(x))//' independent variable values but expecting '//int2str(t%db%n_iv)//'! Quitting...'
+            write(*,*) 'Error with file channel to file '//trim(t%fn)//&
+            '. Attempting to interpolate database, but only received '//&
+            int2str(size(x))//' independent variable values but expecting '//int2str(t%db%n_iv)//'! Quitting...'
             stop
         end if
         
@@ -347,10 +349,11 @@ contains
     
     !! connection ======================================================
     
-    subroutine connection_init(t, p, n)
+    subroutine connection_init(t, p, n, time)
         class(connection), intent(out) :: t
         type(json_value), pointer, intent(in) :: p
         integer, intent(in), optional :: n
+        real, optional, intent(in) :: time
         
         real :: refresh_rate
         
@@ -368,16 +371,21 @@ contains
         ! call t%refresh%init()
         ! t%refresh%lapTime = t%refresh%startTime-t%refresh_time    !! guarantees the first call will trigger a send/recv
         
-        call cpu_time(t%time)
+        if(present(time)) then
+            t%time = 0.0
+        else
+            call cpu_time(t%time)
+        end if
         t%time = t%time - t%refresh_time
         
     end subroutine connection_init
     
-    subroutine connection_send(t, vals)
+    subroutine connection_send(t, vals, time)
         class(connection), intent(inout) :: t
         real, intent(in) :: vals(t%ch%n)
+        real, optional, intent(in) :: time
         
-        if (t%check_refresh()) then
+        if (t%check_refresh(time)) then
             call t%ch%send(vals)
             ! t%refresh%lapTime = t%refresh%lapTime + t%refresh_time
             t%time = t%time + t%refresh_time
@@ -385,12 +393,13 @@ contains
         
     end subroutine connection_send
     
-    function   connection_recv(t, x) result(vals)
+    function   connection_recv(t, x, time) result(vals)
         class(connection), intent(inout) :: t
         real, intent(in), optional :: x(:)
+        real, optional, intent(in) :: time
         real :: vals(t%ch%n)
         
-        if (t%check_refresh()) then
+        if (t%check_refresh(time)) then
             vals = t%ch%recv(x)
             ! t%refresh%lapTime = t%refresh%lapTime + t%refresh_time
             t%time = t%time + t%refresh_time
@@ -400,13 +409,18 @@ contains
         
     end function connection_recv
     
-    function   connection_check_refresh(t) result(flag)
+    function   connection_check_refresh(t,time) result(flag)
         class(connection), intent(in) :: t
+        real, optional, intent(in) :: time
         logical :: flag
         real :: current
         ! flag = t%refresh%getLapTimeSeconds() >= t%refresh_time
-        call cpu_time(current)
-        flag = current - t%time >= t%refresh_time
+        if(present(time)) then
+            current = time
+        else
+            call cpu_time(current)
+        end if
+        flag = current - t%time >= (t%refresh_time - 1.0e-10)
     end function connection_check_refresh
     
 end module connection_m

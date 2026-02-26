@@ -213,7 +213,7 @@
                     "magnitude_limits" : [-25.0,25.0],
                     "rate_limits[/s]" : [-60.0,60.0],
                     "acceleration_limits[/s^2]" : [-1000.0,1000.0],
-                    "time_constant[s]" : 0.5,
+                    "time_constant[s]" : 0.05,
                     "natural_frequency[rad/s]" : 20.0,
                     "damping_ratio" : 0.7
                 },
@@ -237,14 +237,14 @@
                     "time_constant[s]" : 3.0,
                     "natural_frequency[rad/s]" : 1.5,
                     "damping_ratio" : 1.0
-                },
+                }
             },
             "initial" : {
                 "airspeed[ft/s]" : 330.0,
                 "altitude[ft]" : 1000.0,
                 "latitude[deg]" : 0.0,
                 "longitude[deg]" : 0.0,
-                "Euler_angles[deg]" : [0.0,0.0,45.0],
+                "Euler_angles[deg]" : [0.0,0.0,0.0],
                 "type" : "trim",
                 "state" : {
                     "angle_of_attack[deg]" : 0.0,
@@ -255,7 +255,7 @@
                     "controls" : [0.0, 0.0, 0.0, 0.074041048286]
                 },
                 "trim" : {
-                    "type" : "sct",
+                    "type" : "shss",
                     "elevation_or_climb" : "climb",
                     "elevation_angle[deg]" : 5.713375671219,
                     "climb_angle[deg]" : 0.0,

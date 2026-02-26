@@ -237,14 +237,14 @@
                     "time_constant[s]" : 3.0,
                     "natural_frequency[rad/s]" : 1.5,
                     "damping_ratio" : 1.0
-                },
+                }
             },
             "initial" : {
                 "airspeed[ft/s]" : 500.0,
                 "altitude[ft]" : 10000.0,
                 "latitude[deg]" : 0.0,
                 "longitude[deg]" : 0.0,
-                "Euler_angles[deg]" : [0.0,0.0,45.0],
+                "Euler_angles[deg]" : [0.0,0.0,0.0],
                 "type" : "trim",
                 "state" : {
                     "angle_of_attack[deg]" : 0.0,

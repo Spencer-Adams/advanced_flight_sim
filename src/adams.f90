@@ -171,6 +171,9 @@ function quat_to_euler(quat) result(euler)
         euler(1) = atan2(2*(e0*ex + ey*ez), (e0**2 + ez**2 -ex**2 -ey**2))
         euler(2) = asin(2*(e0*ey-ex*ez))
         euler(3) = atan2(2*(e0*ez + ex*ey), (e0**2 + ex**2 -ey**2 -ez**2))
+        if (euler(3) < 0) then 
+            euler(3) = euler(3) + 2*PI 
+        end if 
     end if
 end function quat_to_euler
 

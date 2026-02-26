@@ -1,9 +1,10 @@
 module vehicle_m
-    use adams_m
-    use jsonx_m
-    use linalg_mod
-    use micro_time_m
-    use connection_m
+    ! use adams_m
+    ! use jsonx_m
+    ! use linalg_mod
+    ! use micro_time_m
+    ! use connection_m
+    use controller_m
     implicit none 
 
     character(len=:), allocatable :: geographic_model
@@ -13,7 +14,7 @@ module vehicle_m
         character(len=:), allocatable :: name 
         character(len=:), allocatable :: units 
         integer :: dynamics_order, state_ID
-        real :: commanded_value 
+        real :: set_point 
         real, allocatable :: mag_limit(:), rate_limit(:), accel_limit(:)
         real :: time_constant, nat_freq, damp_ratio 
         real :: display_units = 1.0
@@ -67,11 +68,14 @@ module vehicle_m
         ! initialization constants
         real :: init_V, init_alt, init_state(21)
         real, allocatable :: init_eul(:) ! has to be allocatable because will be read from json object
-        real :: latitude, longitude 
 
         ! variables
         real :: state(21)
         type(control_t) :: controls(4)
+        real :: latitude, longitude 
+
+        ! type(trim_settings_t) :: trim 
+        type(controller_t) :: controller 
 
         ! type(trim_settings_t) :: trim
 
@@ -84,10 +88,10 @@ contains
     subroutine vehicle_init(this, j_vehicle_input, is_save_states, is_rk4_verbose)
         implicit none 
         type(vehicle_t) :: this 
-        type(json_value), pointer :: j_vehicle_input, j_control, j_control_temp
+        type(json_value), pointer :: j_vehicle_input, j_control, j_controller, j_control_temp
         logical, intent(in) :: is_save_states, is_rk4_verbose
         real :: denom 
-        logical :: is_straight_fletchings
+        logical :: is_straight_fletchings, found 
         character(len=:), allocatable :: init_type 
         real, allocatable :: thrust_orientation(:)
         real :: Z_temp,T_temp,P_temp,a_temp,mu_temp
@@ -204,13 +208,19 @@ contains
                 write(*,*) '  - controls'
                 call jsonx_get(this%j_vehicle, 'control_effectors', j_control)
                 call jsonx_get(j_control, '1', j_control_temp)
-                call init_control(this, j_control_temp,1)
+                call init_control_effector(this, j_control_temp,1)
                 call jsonx_get(j_control, '2', j_control_temp)
-                call init_control(this, j_control_temp,2)
+                call init_control_effector(this, j_control_temp,2)
                 call jsonx_get(j_control, '3', j_control_temp)
-                call init_control(this, j_control_temp,3)
+                call init_control_effector(this, j_control_temp,3)
                 call jsonx_get(j_control, '4', j_control_temp)
-                call init_control(this, j_control_temp,4)
+                call init_control_effector(this, j_control_temp,4)
+
+                call json_get(this%j_vehicle, 'controller', j_controller, found)
+                if(found) then 
+                    write(*,*) '   - controller'
+                    call controller_init(this%controller, j_controller)
+                end if 
             end if 
             
             if(this%type == 'arrow' .or. this%type == 'aircraft') then 
@@ -258,10 +268,10 @@ contains
             end if 
 
             !!!! Change commanded deflection values to 0.0
-            this%controls(1)%commanded_value = 0.0
-            this%controls(2)%commanded_value = 0.0
-            this%controls(3)%commanded_value = 0.0
-            this%controls(4)%commanded_value = 0.0
+            ! this%controls(1)%set_point = 0.0
+            ! this%controls(2)%set_point = 0.0
+            ! this%controls(3)%set_point = 0.0
+            ! this%controls(4)%set_point = 0.0
             
             this%state = this%init_state
 
@@ -269,6 +279,8 @@ contains
             if (this%save_states) then
                 call vehicle_write_state(this, 0.0, this%state)
             end if 
+
+            call get_controller_input(this, 0.0)
 
             ! Write initial geographic data
             if (geographic_model_ID > 0) then
@@ -309,7 +321,7 @@ contains
             call jsonx_get(j_state, 'controls', temp_controls, 0.0, 4)
             do i =1,4
                 this%init_state(i + 13) = temp_controls(i)/this%controls(i)%display_units
-                this%controls(i)%commanded_value = this%init_state(i + 13)
+                this%controls(i)%set_point = this%init_state(i + 13)
             end do 
         end if 
     end subroutine init_to_state
@@ -458,8 +470,8 @@ contains
         this%init_state(4:6) = trim_array(3:5)
 
         do i = 1,4
-            this%controls(i)%commanded_value = trim_array(5+i) 
-            this%init_state(13 + i) = this%controls(i)%commanded_value
+            this%controls(i)%set_point = trim_array(5+i) 
+            this%init_state(13 + i) = this%controls(i)%set_point
         end do 
 
         load_factor_temp = 0.0
@@ -481,7 +493,7 @@ contains
         this%limit_controls = .true. 
     end subroutine init_to_trim
 
-    subroutine init_control(this, j_control, ID)
+    subroutine init_control_effector(this, j_control, ID)
         implicit none 
         type(vehicle_t) :: this 
         type(json_value), pointer :: j_control 
@@ -528,9 +540,9 @@ contains
         end if 
         
         this%controls(ID)%state_ID = 13 + ID 
-        this%controls(ID)%commanded_value = 0.0 
+        this%controls(ID)%set_point = 0.0 
         
-    end subroutine init_control
+    end subroutine init_control_effector
 
     subroutine mass_inertia(this) 
         implicit none 
@@ -869,7 +881,7 @@ contains
                 dd_delta = 0.0
             
             case (1) ! first-order actuator dynamics 
-                d_delta = (this%controls(i)%commanded_value-delta)/this%controls(i)%time_constant
+                d_delta = (this%controls(i)%set_point-delta)/this%controls(i)%time_constant
                 d_delta = max(min(this%controls(i)%rate_limit(2), d_delta), this%controls(i)%rate_limit(1)) ! rate limit 
                 ! deflection limit consistency 
                 if (delta <= this%controls(i)%mag_limit(1) + TOLERANCE .and. d_delta < 0.0) d_delta = 0.0
@@ -883,7 +895,7 @@ contains
                 if (delta <= this%controls(i)%mag_limit(1) + TOLERANCE .and. d_delta < 0.0) d_delta = 0.0
                 if (delta >= this%controls(i)%mag_limit(2) - TOLERANCE .and. d_delta > 0.0) d_delta = 0.0
                 
-                dd_delta = wn**2*(this%controls(i)%commanded_value - delta) - 2.0*zeta*wn*d_delta
+                dd_delta = wn**2*(this%controls(i)%set_point - delta) - 2.0*zeta*wn*d_delta
                 dd_delta = max(min(this%controls(i)%accel_limit(2), dd_delta), this%controls(i)%accel_limit(1)) ! acceleration limit 
                 
                 ! rate limit consistency 
@@ -892,9 +904,9 @@ contains
 
                 ! position limit consistency 
                 if (delta <= this%controls(i)%mag_limit(1) + TOLERANCE .and. &
-                    this%controls(i)%commanded_value <= this%controls(i)%mag_limit(1) + TOLERANCE) dd_delta = 0.0
+                    this%controls(i)%set_point <= this%controls(i)%mag_limit(1) + TOLERANCE) dd_delta = 0.0
                 if (delta >= this%controls(i)%mag_limit(2) - TOLERANCE .and. &
-                    this%controls(i)%commanded_value >= this%controls(i)%mag_limit(2) - TOLERANCE) dd_delta = 0.0
+                    this%controls(i)%set_point >= this%controls(i)%mag_limit(2) - TOLERANCE) dd_delta = 0.0
             end select
 
             res(13 + i) = d_delta 
@@ -939,6 +951,15 @@ contains
 
         if (geographic_model_ID>0) call update_geographic(this,y,y1)
         call quat_norm(y1(10:13))
+
+        call get_controller_input(this, t + dt)
+        do i = 1,4
+            if(this%controls(i)%dynamics_order==0) then 
+                this%state(13+i) = max(min(this%controls(i)%set_point, &
+                this%controls(i)%mag_limit(2)), this%controls(i)%mag_limit(1))
+            end if 
+        end do 
+
         this%state = y1 
         ! if (this%save_states .and. geographic_model_ID>0 .and. &
             ! (abs(t+dt-print_times(1))<0.001 .or. (abs(t+dt-print_times(2))<0.001) &
@@ -946,7 +967,8 @@ contains
         if (this%save_states .and. geographic_model_ID>0) then
             euler_angles = quat_to_euler(this%state(10:13))
             azimuth = euler_angles(3)
-            write(this%iunit_geographic,'(*(G0.8,:,","))') t+dt, this%latitude*180.0/PI, this%longitude*180.0/PI, azimuth*180.0/PI
+            write(this%iunit_geographic,'(*(G0.8,:,","))')&
+             t+dt, this%latitude*180.0/PI, this%longitude*180.0/PI, azimuth*180.0/PI
         end if
         !  if (this%save_states .and. &
         ! (abs(t+dt-print_times(1))<0.001 .or. (abs(t+dt-print_times(2))<0.001) &
@@ -955,6 +977,28 @@ contains
             call vehicle_write_state(this, t+dt,y1)
         end if
     end subroutine vehicle_tick_state
+
+    subroutine get_controller_input(this, time) ! do UDP stuff here if you decide to do that
+        implicit none 
+        type(vehicle_t) :: this 
+        real, intent(in) :: time 
+        real :: controls_setpoint(4)
+        integer :: i 
+
+        if(this%controller%running) then 
+            controls_setpoint(:) = controller_update(this%controller, this%state, time)
+            do i = 1,4
+                this%controls(i)%set_point = controls_setpoint(i)
+
+                if(this%controls(i)%dynamics_order ==0) then 
+                    this%state(13+i) = max(min(this%controls(i)%set_point,&
+                     this%controls(i)%mag_limit(2)), this%controls(i)%mag_limit(1))
+                end if 
+                ! make sure we don't exceed the maximum deflection for the control surface in question
+            end do 
+        end if 
+        
+    end subroutine get_controller_input
 
     subroutine update_geographic(this, y1, y2)
         implicit none 
@@ -1574,10 +1618,10 @@ contains
         w = this%init_V*sin(alpha)*cos(beta) 
         psi = trim_azimuth_angle
         theta = trim_elevation_angle
-        this%controls(1)%commanded_value = da
-        this%controls(2)%commanded_value = de
-        this%controls(3)%commanded_value = dr
-        this%controls(4)%commanded_value = tau
+        this%controls(1)%set_point = da
+        this%controls(2)%set_point = de
+        this%controls(3)%set_point = dr
+        this%controls(4)%set_point = tau
 
         quaternion = euler_to_quat([phi,theta,psi])
         e0 = quaternion(1)

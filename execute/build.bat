@@ -1,2 +1,2 @@
 
-gfortran -fdefault-real-8 -O2 ../common/json.f90 ../common/jsonx.f90 ../common/linalg.f90 ../common/database_m.f90 ../common/upd_windows_m.f90 ../common/connection_m.f90 ../src/adams.f90 ../common/timing.f90 ../src/vehicle.f90 ../src/sim.f90 ../src/main.f90 -o sim.exe -lws2_32 
+gfortran -fdefault-real-8 -O2 ../common/json.f90 ../common/jsonx.f90 ../common/linalg.f90 ../common/database_m.f90 ../common/upd_windows_m.f90 ../common/connection_m.f90 ../src/adams.f90 ../common/timing.f90 ../src/controller.f90 ../src/vehicle.f90 ../src/sim.f90 ../src/main.f90 -o sim.exe -lws2_32 
