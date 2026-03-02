@@ -1,7 +1,7 @@
 {
     "simulation" : {
         "time_step[s]" : 0.01,
-        "end_time[s]" : 4.0,
+        "end_time[s]" : 10.0,
         "rk4_verbose" : false,
         "save_states" : true,
         "geographic_model" : "sphere",
@@ -246,7 +246,7 @@
                     "number_of_values": 3,
                     "refresh_rate": 1000,
                     "channel_type": "file",
-                    "filename" : "pilot_commands.csv",
+                    "filename" : "pilot_12.6.2.csv",
                     "database_type" : "rectilinear",
                     "double_precision" : true
                     }
@@ -256,24 +256,24 @@
                         "update_rate[hz]" : 1000,
                         "units" : "deg",
                         "limits" : [-21.5,21.5],
-                        "KP" : -200.0,
-                        "KI" : -200.0,
+                        "KP" : -35.0,
+                        "KI" : -20.0,
                         "KD" : 0.0
                     },
                     "elevator" : {
                         "update_rate[hz]" : 1000,
                         "units" : "deg",
                         "limits" : [-25.0,25.0],
-                        "KP" : 0.0,
-                        "KI" : 0.0,
+                        "KP" : -80.0,
+                        "KI" : -100.0,
                         "KD" : 0.0
                     },
                     "rudder" : {
                         "update_rate[hz]" : 1000,
                         "units" : "deg",
                         "limits" : [-30.0,30.0],
-                        "KP" : 0.0,
-                        "KI" : 0.0,
+                        "KP" : -100.0,
+                        "KI" : -100.0,
                         "KD" : 0.0
                     }
                 }
@@ -300,7 +300,7 @@
                     "climb_angle[deg]" : 0.0,
                     "type_sct" : {
                         "bank_or_load_factor" : "bank",
-                        "bank_angle[deg]" : 0.0,
+                        "bank_angle[deg]" : 20.0,
                         "load_factor" : 2.2
                     },
                     "type_shss" : {

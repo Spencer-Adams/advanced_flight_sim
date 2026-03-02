@@ -113,7 +113,7 @@ contains
             this%prev_error = commanded - actual 
             this%error_int = 0.0
             this%error_deriv = 0.0
-            ans = this%KP*this%prev_error
+            ans = this%KP*this%prev_error/dyp 
             this%prev_ans = ans 
             return 
         end if 
@@ -125,9 +125,9 @@ contains
             ! Integrator with clamping 
             if ((this%prev_ans > this%limit(1)) .and. (this%prev_ans < this%limit(2))) then 
                 this%error_int = this%error_int + 0.5*(this%prev_error + this%error)*dt
-            else 
-                write(*,*) this%name, ' PID controller saturated at ',&
-                 this%prev_ans*this%display_units,'. Using Integrator clamping'
+            ! else 
+            !     write(*,*) this%name, ' PID controller saturated at ',&
+            !      this%prev_ans*this%display_units,'. Using Integrator clamping'
             end if 
             ! Derivative 
             if(dt>TOLERANCE) this%error_deriv = (this%error-this%prev_error)/dt 
