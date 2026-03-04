@@ -1,7 +1,7 @@
 {
     "simulation" : {
         "time_step[s]" : 0.01,
-        "end_time[s]" : 10.0,
+        "end_time[s]" : 60.0,
         "rk4_verbose" : false,
         "save_states" : true,
         "geographic_model" : "sphere",
@@ -246,7 +246,7 @@
                     "number_of_values": 3,
                     "refresh_rate": 1000,
                     "channel_type": "file",
-                    "filename" : "pilot_12.6.2.csv",
+                    "filename" : "pilot_12.6.3.csv",
                     "database_type" : "rectilinear",
                     "double_precision" : true
                     }
@@ -299,7 +299,6 @@
                     },
                     "V->throttle" : {
                         "update_rate[hz]" : 1000,
-                        "units" : "deg",
                         "limits" : [0.0,1.0],
                         "kp" : 0.01,
                         "ki" : 0.002,
@@ -330,7 +329,7 @@
                     "climb_angle[deg]" : 0.0,
                     "type_sct" : {
                         "bank_or_load_factor" : "bank",
-                        "bank_angle[deg]" : 20.0,
+                        "bank_angle[deg]" : 0.0,
                         "load_factor" : 2.2
                     },
                     "type_shss" : {

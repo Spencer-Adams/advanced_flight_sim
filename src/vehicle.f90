@@ -1,12 +1,6 @@
 module vehicle_m
-    ! use adams_m
-    ! use jsonx_m
-    ! use linalg_mod
-    ! use micro_time_m
-    ! use connection_m
     use controller_m
     implicit none 
-
     character(len=:), allocatable :: geographic_model
     integer :: geographic_model_ID
 
@@ -81,8 +75,6 @@ module vehicle_m
 
     end type vehicle_t
 
-
-
 contains 
 
     subroutine vehicle_init(this, j_vehicle_input, is_save_states, is_rk4_verbose)
@@ -116,15 +108,16 @@ contains
                         "r[rad/s],x[ft],y[ft]," // &                   
                         "z[ft],e0,ex," // &
                         "ey,ez,aileron[deg],elevator[deg],rudder[deg],throttle," // &
-                        "aileron_dot[rad/s],elevator_dot[rad/s],rudder_dot[rad/s],throttle_dot"
+                        "aileron_dot[rad/s],elevator_dot[rad/s],rudder_dot[rad/s],throttle_dot," // &
+                        "longitude[deg], latitude[deg], azimuth[deg]"
                 write(*,*) '   - saving states to ', this%states_filename
                 
-                if (geographic_model_ID > 0) then
-                    this%geographic_filename = trim(this%name)//'_geographic.csv'
-                    open(newunit=this%iunit_geographic, file = this%geographic_filename, status = 'REPLACE')
-                    write(this%iunit_geographic,*) "time[s],latitude[deg],longitude[deg],azimuth[deg]"
-                    write(*,*) '   - saving geographic data to ', this%geographic_filename
-                end if
+                ! if (geographic_model_ID > 0) then
+                !     this%geographic_filename = trim(this%name)//'_geographic.csv'
+                !     open(newunit=this%iunit_geographic, file = this%geographic_filename, status = 'REPLACE')
+                !     write(this%iunit_geographic,*) "time[s],latitude[deg],longitude[deg],azimuth[deg]"
+                !     write(*,*) '   - saving geographic data to ', this%geographic_filename
+                ! end if
             end if 
 
             write(*,*) '   - Initializing mass and inertia properties'
@@ -267,28 +260,15 @@ contains
                 call init_to_trim(this)
             end if 
 
-            !!!! Change commanded deflection values to 0.0
-            ! this%controls(1)%set_point = 0.0
-            ! this%controls(2)%set_point = 0.0
-            ! this%controls(3)%set_point = 0.0
-            ! this%controls(4)%set_point = 0.0
-            
             this%state = this%init_state
 
-
             if (this%save_states) then
-                call vehicle_write_state(this, 0.0, this%state)
+                write(this%iunit_states,'(*(G0.15,:,","))') 0.0, this%state(1:13), &
+                this%state(14:16)*180.0/PI, this%state(17:21), & 
+                this%latitude*180.0/PI, this%longitude*180.0/PI, azimuth_init*180.0/PI
             end if 
 
             call get_controller_input(this, 0.0)
-
-            ! Write initial geographic data
-            if (geographic_model_ID > 0) then
-                euler_angles_init = quat_to_euler(this%state(10:13))
-                azimuth_init = euler_angles_init(3)
-                write(this%iunit_geographic,'(*(G0.15,:,","))') 0.0, this%latitude*180.0/PI, &
-                      this%longitude*180.0/PI, azimuth_init*180.0/PI
-            end if
 
         end if     
 
@@ -961,20 +941,10 @@ contains
         end do 
 
         this%state = y1 
-        ! if (this%save_states .and. geographic_model_ID>0 .and. &
-            ! (abs(t+dt-print_times(1))<0.001 .or. (abs(t+dt-print_times(2))<0.001) &
-            ! .or. (abs(t+dt-print_times(3))<0.001))) then
-        if (this%save_states .and. geographic_model_ID>0) then
+         if (this%save_states) then
             euler_angles = quat_to_euler(this%state(10:13))
             azimuth = euler_angles(3)
-            write(this%iunit_geographic,'(*(G0.8,:,","))')&
-             t+dt, this%latitude*180.0/PI, this%longitude*180.0/PI, azimuth*180.0/PI
-        end if
-        !  if (this%save_states .and. &
-        ! (abs(t+dt-print_times(1))<0.001 .or. (abs(t+dt-print_times(2))<0.001) &
-        ! .or. (abs(t+dt-print_times(3))<0.001))) then
-         if (this%save_states) then 
-            call vehicle_write_state(this, t+dt,y1)
+            call vehicle_write_state(this, t+dt,y1, azimuth)
         end if
     end subroutine vehicle_tick_state
 
@@ -992,7 +962,7 @@ contains
 
                 if(this%controls(i)%dynamics_order ==0) then 
                     this%state(13+i) = max(min(this%controls(i)%set_point,&
-                     this%controls(i)%mag_limit(2)), this%controls(i)%mag_limit(1))
+                    this%controls(i)%mag_limit(2)), this%controls(i)%mag_limit(1))
                 end if 
                 ! make sure we don't exceed the maximum deflection for the control surface in question
             end do 
@@ -1012,11 +982,6 @@ contains
         real :: quat(4) 
         real :: Rp, Re, e2 
         real :: temp, Rx, Ry, tx, ty
-
-        ! write(*,*) "state 1"
-        ! write(*,*) y1 
-        ! write(*,*) "state 2 in"
-        ! write(*,*) y2 
 
         dx = y2(7) - y1(7)
         dy = y2(8) - y1(8)
@@ -1045,35 +1010,11 @@ contains
                 yhp = cT*sg 
                 zhp = -sP*sT +cP*cT*cg 
                 rhat = sqrt(xhat**2 + yhat**2)
-                ! write(*,*) "Latitude before", this%latitude 
-                ! write(*,*) "Longitude before", this%longitude 
                 this%latitude = atan2(zhat,rhat)
                 this%longitude = Psi1 + atan2(yhat, xhat)
                 Chat = xhat**2*zhp 
                 Shat = (xhat*yhp - yhat*xhp)*cos(this%latitude)**2*cos(this%longitude-Psi1)**2
                 dg = atan2(Shat,Chat) - g1
-                ! write(*,*) "H1", H1
-                ! write(*,*) "Phi1", Phi1
-                ! write(*,*) "Psi1", Psi1
-                ! write(*,*) "cP", cP
-                ! write(*,*) "sP", sP
-                ! write(*,*) "cT", cT
-                ! write(*,*) "sT", sT
-                ! write(*,*) "g1", g1
-                ! write(*,*) "cg", cg
-                ! write(*,*) "sg", sg
-                ! write(*,*) "xhat", xhat 
-                ! write(*,*) "yhat", yhat 
-                ! write(*,*) "zhat", zhat
-                ! write(*,*) "xhp", xhp  
-                ! write(*,*) "yhp", yhp  
-                ! write(*,*) "zhp", zhp  
-                ! write(*,*) "rhat", rhat
-                ! write(*,*) "Chat", Chat 
-                ! write(*,*) "Shat", Shat
-                ! write(*,*) "dg", dg
-
-
             else ! ellipse  
                 Rp = 6356.7516/0.3048*1000.0
                 Re = 6378.1363/0.3048*1000.0
@@ -1096,39 +1037,24 @@ contains
             if(this%longitude > PI) this%longitude = this%longitude - 2.0*PI 
             if(this%longitude < -PI) this%longitude = this%longitude + 2.0*PI 
 
-            ! write(*,*) "Latitude after", this%latitude 
-            ! write(*,*) "Longitude after", this%longitude 
 
             cg = cos(0.5*dg)
             sg = sin(0.5*dg)
-            
-            ! write(*,*) "cg second", cg
-            ! write(*,*) "sg second", sg
-
             quat(1) = -y2(13)
             quat(2) = -y2(12)
             quat(3) =  y2(11)
             quat(4) =  y2(10)
             y2(10:13) = cg*y2(10:13) + sg*quat(:)
-            
-            ! write(*,*)
-            ! write(*,*) "state 2 out"
-            ! write(*,*) y2 
-
         end if 
     end subroutine update_geographic
 
-    subroutine vehicle_write_state(this, time, state)
+    subroutine vehicle_write_state(this, time, state, azimuth)
         implicit none 
         type(vehicle_t) :: this
-        real, intent(in) :: time, state(21)
+        real, intent(in) :: time, state(21), azimuth 
         logical :: is_open
-        ! inquire(file=this%states_filename, opened = is_open)
-        ! if (is_open) then 
-            ! write(*,*) this%states_filename, ' is already open. THIS PROGRAM WILL NOT RUN IF THAT IS NOT CLOSED'
-        ! else 
-        write(this%iunit_states,'(*(G0.15,:,","))') time, state(1:13), state(14:16)*180.0/PI, state(17:21)
-        ! end if 
+        write(this%iunit_states,'(*(G0.15,:,","))') time, state(1:13), state(14:16)*180.0/PI, state(17:21), & 
+        this%latitude*180.0/PI, this%longitude*180.0/PI, azimuth*180.0/PI
     end subroutine vehicle_write_state
 
     function runge_kutta(this, t_0, state, delta_t) result(state_out)
@@ -1603,16 +1529,10 @@ contains
             beta = state(2)
             phi = trim_bank_angle
         end if 
-        ! beta = state(2)
         da = state(3)
         de = state(4)
         dr = state(5)
         tau = state(6)
-        ! if (tau < 0.0) then 
-            ! tau = 0.0
-        ! if (tau > 1.0) then 
-        !     tau = 1.0
-        ! end if 
         u = this%init_V*cos(alpha)*cos(beta)
         v = this%init_V*sin(beta)
         w = this%init_V*sin(alpha)*cos(beta) 
@@ -1630,13 +1550,9 @@ contains
         ez = quaternion(4)
         ! For trim: deltas = control values, delta_dots = 0 (steady-state)
         full_state_temp = [u,v,w,p,q,r,x,y,z,e0,ex,ey,ez,da,de,dr,tau,0.0,0.0,0.0,0.0]
-        ! write(*,*) "full_state_temp", full_state_temp
         full_state = differential_equations(this, 0.0, full_state_temp)
-        ! write(*,*) "full_state" 
-        ! write(*,*) full_state
         return_state(1:6) = full_state(1:6)
         ! Uncomment for detailed residual debugging:
-        ! write(*,'(A,6E15.6)') "  Residuals [udot,vdot,wdot,pdot,qdot,rdot]: ", return_state
     end function calc_residual
 
     function create_jacobian(this, states, step_size, p, q, r, is_trim_sideslip_angle, &

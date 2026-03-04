@@ -1,0 +1,7 @@
+parameter,independent_variables,1,
+time ,p[deg/s],q[deg/s],r[deg/s]
+0,0,0,0
+0.99999,0,0,0
+1,50,0,0
+4,50,0,0
+4.1,50,0,0
