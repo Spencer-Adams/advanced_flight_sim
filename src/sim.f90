@@ -3,16 +3,51 @@ module sim_m
     implicit none
     ! Variables within sim_m
     type(vehicle_t), allocatable :: vehicles(:)
+    type(connection) :: graphics, connect_controls 
+    type(json_value), pointer :: j_main
     integer :: num_vehicles 
     real :: init_state(13)
     real :: controls(4)
     real :: controls_from_connect(4)
     logical :: save_states, rk4_verbose
-    type(connection) :: graphics, connect_controls 
-    type(json_value), pointer :: j_main
+
     ! aero coefficients 
     integer :: newton_max_iter
 contains
+
+    subroutine init(filename)
+        implicit none 
+        character(100), intent(in) :: filename
+        type(json_value), pointer :: j_connections, j_graphics, j_controls
+        type(json_value), pointer :: j_vehicles, j_temp, j_atmosphere
+        integer :: i 
+        write(*,*) 'Initializing Simulation...'
+        ! type2, intent(out) ::  arg2
+        call jsonx_load(filename, j_main)
+        ! global settings 
+
+
+        call jsonx_get(j_main, 'simulation.rk4_verbose', rk4_verbose, .false.)
+        call jsonx_get(j_main, 'simulation.save_states', save_states, .true.)
+        call jsonx_get(j_main, 'simulation.geographic_model', geographic_model, 'none')
+        geographic_model_ID = 0
+        if (geographic_model == 'sphere') geographic_model_ID = 1
+        if (geographic_model == 'ellipse') geographic_model_ID = 2
+
+        write(*,*) 'Reading atmosphere object in json'
+        call jsonx_get(j_main, 'atmosphere', j_atmosphere)
+        
+        write(*,*) 'Initializing vehicles'
+        call jsonx_get(j_main, 'vehicles', j_vehicles)
+        num_vehicles = json_value_count(j_vehicles)
+        allocate(vehicles(num_vehicles))
+
+        do i = 1, num_vehicles
+            call json_value_get(j_vehicles, i, j_temp)
+            call atmosphere_init(vehicles(i)%atm,j_atmosphere)
+            call vehicle_init(vehicles(i), j_temp, save_states, rk4_verbose)
+        end do 
+    end subroutine init
     ! end subroutine simulation_main
     subroutine run()
         implicit none 
@@ -73,35 +108,5 @@ contains
         write(*,*) 'Total error in time [s] = ', integrated_time - actual_time
     end subroutine run
 
-    subroutine init(filename)
-        implicit none 
-        character(100), intent(in) :: filename
-        type(json_value), pointer :: j_connections, j_graphics, j_controls
-        type(json_value), pointer :: j_vehicles, j_temp, j_atmosphere
-        integer :: i 
-        write(*,*) 'Initializing Simulation...'
-        ! type2, intent(out) ::  arg2
-        call jsonx_load(filename, j_main)
-        ! global settings 
-        ! write(*,*) 'Reading atmosphere object in json'
-        ! call jsonx_get(j_main, 'atmosphere', j_atmosphere)
 
-        call jsonx_get(j_main, 'simulation.rk4_verbose', rk4_verbose, .false.)
-        call jsonx_get(j_main, 'simulation.save_states', save_states, .true.)
-        call jsonx_get(j_main, 'simulation.geographic_model', geographic_model, 'none')
-        geographic_model_ID = 0
-        if (geographic_model == 'sphere') geographic_model_ID = 1
-        if (geographic_model == 'ellipse') geographic_model_ID = 2
-        
-        write(*,*) 'Initializing vehicles'
-        call jsonx_get(j_main, 'vehicles', j_vehicles)
-        num_vehicles = json_value_count(j_vehicles)
-        allocate(vehicles(num_vehicles))
-
-        do i = 1, num_vehicles
-            call json_value_get(j_vehicles, i, j_temp)
-            ! call atmosphere_init(vehicles(i)%atm,j_atmosphere)
-            call vehicle_init(vehicles(i), j_temp, save_states, rk4_verbose)
-        end do 
-    end subroutine init
 end module sim_m

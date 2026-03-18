@@ -7,6 +7,24 @@
         "geographic_model" : "sphere",
         "geographic_model_options" : ["ellipse","sphere","none"]
     },
+    "atmosphere" : {
+        "constant_wind[ft/s]" : [0.0,0.0,0.0],
+        "turbulence" : {
+            "model" : "dryden_beal",
+            "wingspan[ft]" : 30.0,
+            "hstab_distance[ft]" : 15.0,
+            "vstab_distance[ft]" : 15.0,
+            "intensity" : "light",
+            "repeatable" : true,
+            "sample" : {
+                "save_filename" : "turb_sample.csv",
+                "height_above_ground[ft]" : 2000,
+                "number_of_points" : 20000,
+                "dx[ft]": 20,
+                "psd_analyses" : 1000
+            }
+        }
+    },
     "vehicles" : {
         "ping-pong-ball" : {
             "type" : "sphere",

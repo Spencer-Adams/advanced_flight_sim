@@ -1,5 +1,6 @@
 module vehicle_m
     use controller_m
+    use atmosphere_m
     implicit none 
     character(len=:), allocatable :: geographic_model
     integer :: geographic_model_ID
@@ -71,7 +72,7 @@ module vehicle_m
         ! type(trim_settings_t) :: trim 
         type(controller_t) :: controller 
 
-        ! type(trim_settings_t) :: trim
+        type(atmosphere_t) :: atm 
 
     end type vehicle_t
 
