@@ -19,9 +19,9 @@
             "sample" : {
                 "save_filename" : "turb_sample.csv",
                 "height_above_ground[ft]" : 2000,
-                "number_of_points" : 20000,
+                "number_of_points" : 16384,
                 "dx[ft]": 20.0,
-                "psd_analyses" : 8
+                "psd_analyses" : 1000
             }
         }
     },

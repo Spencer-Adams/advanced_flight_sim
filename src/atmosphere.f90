@@ -17,8 +17,11 @@ module atmosphere_m
         real :: severe_sig(4) = (/15.,21.,21.,3./)
 
         real, allocatable :: turb_hag(:), turb_sig(:)
-        real :: prev_turb(3), prev_xyz(3), prev_f, prev_g
-        real :: Lu, Lv, Lw
+        real :: w_disturbs(20), v_disturbs(20)
+        real :: etau_array(20), etav_array(20), etaw_array(20), etap_array(20) 
+        real :: prev_turb(4), prev_xyz(3), prev_f, prev_g
+        real :: Lu, Lv, Lw, Lb 
+        real :: xff 
     end type atmosphere_t
 contains 
 
@@ -79,11 +82,14 @@ contains
                         this%Lu = 1750.0
                         this%Lv = 875.0
                         this%Lw = 875.0
+                        this%Lb = 4*this%wingspan/PI
                     case('dryden_8785')
                         this%Lu = 1750.0
                         this%Lv = 875.0
                         this%Lw = 875.0
+                        this%Lb = 4*this%wingspan/PI
                 end select 
+                this%xff = 0.0
                 this%prev_turb(:) = 0.0
                 this%prev_xyz(:) = 0.0
                 this%prev_f = 0.0
@@ -101,10 +107,9 @@ contains
         character(len=:), allocatable :: fn 
         integer :: i, j, n, n_psd, iunit, psd_mean_unit 
         real, allocatable :: vals(:,:), psd_mean(:,:),psd_temp(:,:)
-        real :: hag, sigma, dx, turb(3) ! hag means height above ground 
+        real :: hag, sigma, dx, turb(6) ! hag means height above ground 
         real :: mean, stdev 
         logical :: found 
-
         ! Test random number generator function 
         ! call test_rand_normal()
         write(*,*) '    Sampling Atmospheric Turbulence...'
@@ -114,15 +119,15 @@ contains
         call jsonx_get(j_sample, 'number_of_points', n) 
         call jsonx_get(j_sample, 'dx[ft]', dx)
         call jsonx_get(j_sample, 'height_above_ground[ft]', hag)
-        allocate(vals(n,3))
+        allocate(vals(n,4))
 
         sigma = interpolate_1D(this%turb_hag, this%turb_sig, hag)
         write(*,*) '    Altitude = ', hag 
         write(*,*) '    Turbulence Standard Deviation, sigma = ', sigma
-        write(iunit,*) 'distance[ft],uprime[ft/s],vprime[ft/s],wprime[ft/s]' 
+        write(iunit,*) 'distance[ft],uprime[ft/s],vprime[ft/s],wprime[ft/s],pprime[rad/s]' 
         do i = 1,n
             turb(:) = get_turbulence(this,dx,sigma,sigma,sigma)
-            write(iunit,*) dx*real(i-1),',',turb(1),',',turb(2),',',turb(3)
+            write(iunit,*) dx*real(i-1),',',turb(1),',',turb(2),',',turb(3),',',turb(4)
             vals(i,:) = turb(:)
         end do 
         close(iunit)
@@ -144,7 +149,7 @@ contains
                     turb(:) = get_turbulence(this,dx,sigma,sigma,sigma)
                     vals(i,:) = turb(:) 
                 end do 
-                call psd(vals(:,1),dx,psd_norm=psd_temp) ! u=1, v=2, w=3
+                call psd(vals(:,4),dx,psd_norm=psd_temp) ! 1=u, 2=v, 3=w, 4=p
                 psd_mean(:,2) = psd_mean(:,2) + psd_temp(:,2)/n_psd 
             end do 
 
@@ -159,7 +164,7 @@ contains
         implicit none 
         type(atmosphere_t) :: this
         real :: states(21)
-        real :: ans(3)
+        real :: ans(4)
         real :: dx, sigma 
         dx = sqrt((states(7)-this%prev_xyz(1))**2 + (states(8)-this%prev_xyz(2))**2 + (states(9)-this%prev_xyz(3))**2)
         sigma = interpolate_1D(this%turb_hag, this%turb_sig, -states(9)) ! Assumes ground height is sea-level
@@ -171,7 +176,8 @@ contains
         implicit none 
         type(atmosphere_t) :: this
         real :: dx, su, sv, sw 
-        real :: ans(3)
+        real :: ans(6)
+        this%xff = this%xff + dx 
         select case(trim(this%turb_model))
             case('dryden_beal')
                 ans(:) = dryden_beal(this,dx,su,sv,sw)
@@ -184,16 +190,20 @@ contains
         implicit none 
         type(atmosphere_t) :: this
         real :: dx, su, sv, sw 
-        real :: ans(3)
-        real :: Au, Av, Aw, etau, etav, etaw, f, g 
+        real :: ans(6)
+        real :: Au, Av, Aw, Ap 
+        real :: etau, etav, etaw, etap 
+        real :: f, g 
 
         Au = 0.5*dx/this%Lu 
         Av = 0.25*dx/this%Lv 
         Aw = 0.25*dx/this%Lw
+        Ap = 0.5*dx/this%Lb
 
         etau = rand_normal()*su*sqrt(2.0*this%Lu/dx)
         etav = rand_normal()*sv*sqrt(2.0*this%Lv/dx)
         etaw = rand_normal()*sw*sqrt(2.0*this%Lw/dx)
+        etap = rand_normal()*sw*sqrt(0.8*PI*(this%Lw/this%Lb)**(1.0/3.0)/this%Lw/dx)
 
         f = ((1.0-Av)*this%prev_f + 2.0*Av*etav)/(1.0+Av)
         g = ((1.0-Aw)*this%prev_g + 2.0*Aw*etaw)/(1.0+Aw)
@@ -201,7 +211,7 @@ contains
         ans(1) = ((1.0-Au)*this%prev_turb(1)+2.0*Au*etau)/(1.0 + Au)
         ans(2) = ((1.0-Av)*this%prev_turb(2)+Av*(f+this%prev_f)+sqrt(3.)*(f-this%prev_f))/(1.0+Av)
         ans(3) = ((1.0-Aw)*this%prev_turb(3)+Aw*(g+this%prev_g)+sqrt(3.)*(g-this%prev_g))/(1.0+Aw)
-
+        ans(4) = ((1.0-Ap)*this%prev_turb(4) + 2.0*Ap*etap)/(1 + Ap)
         ! now do disturbances in p,q,r here (ans(4), ans(5), ans(6))
 
         this%prev_f = f 
@@ -213,7 +223,7 @@ contains
         implicit none 
         type(atmosphere_t) :: this
         real :: dx, su, sv, sw 
-        real :: ans(3)
+        real :: ans(4)
         ! AS PLACEHOLDER, CALL BEAL VERSION UNTIL THIS IS IMPLEMENTED
         ans = dryden_beal(this,dx,su,sv,sw)
     end function dryden_8785
